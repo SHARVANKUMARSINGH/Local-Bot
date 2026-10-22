@@ -1,4 +1,4 @@
-name: Build Local Bots Android APKs
+name: Build & Release Local Bots Android APKs
 
 on:
   push:
@@ -11,9 +11,12 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+permissions:
+  contents: write
+
 jobs:
   build:
-    name: Build Multi-Architecture APKs
+    name: Build Multi-Architecture APKs & Release
     runs-on: ubuntu-latest
 
     steps:
@@ -29,7 +32,7 @@ jobs:
           java-version: '17'
           cache: 'gradle'
 
-      - name: Setup Android SDK and NDK
+      - name: Setup Android SDK
         uses: android-actions/setup-android@v3
 
       - name: Install Android NDK & CMake
@@ -84,3 +87,27 @@ jobs:
         with:
           name: LocalBots-All-APKs
           path: build-artifacts/*.apk
+
+      - name: Create GitHub Release and Upload APKs
+        if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master' || github.event_name == 'workflow_dispatch'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v1.0.0-b${{ github.run_number }}
+          name: "Local Bots v1.0.0 (Build ${{ github.run_number }})"
+          body: |
+            # Local Bots v1.0.0 Release
+
+            Autonomous AI Computer-Use Agent running natively on Android with an embedded `aarch64` Linux runtime.
+
+            ### Available Download Formats:
+            * **`arm64-v8a` APK**: Primary optimized build for 64-bit ARM Android devices.
+            * **`armeabi-v7a` APK**: Compatible build for older 32-bit ARM devices.
+            * **`x86_64` APK**: Optimized for PC Android Emulators, WSA, and Waydroid.
+            * **`universal` APK**: Universal multi-architecture bundle.
+          files: |
+            build-artifacts/*.apk
+          draft: false
+          prerelease: false
+          make_latest: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

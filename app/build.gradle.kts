@@ -7,6 +7,7 @@ plugins {
 android {
     namespace = "com.localbots.app"
     compileSdk = 35
+    ndkVersion = "26.1.10909125"
 
     defaultConfig {
         applicationId = "com.localbots.app"
