@@ -43,8 +43,9 @@ jobs:
         run: chmod +x gradlew || true
 
       - name: Compile and Assemble Debug APKs (Multi-ABI Splits)
+        timeout-minutes: 15
         run: |
-          ./gradlew assembleDebug --stacktrace --no-daemon
+          ./gradlew assembleDebug --stacktrace --no-daemon --console=plain
 
       - name: Identify and Organize Generated APKs
         run: |
