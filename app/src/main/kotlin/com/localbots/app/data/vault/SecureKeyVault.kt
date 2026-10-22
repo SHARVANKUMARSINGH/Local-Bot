@@ -28,8 +28,8 @@ class SecureKeyVault(private val context: Context) {
                 EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
                 EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM
             )
-        } catch (e: Exception) {
-            // Fallback for sandboxed emulators where KeyStore might be restricted
+        } catch (t: Throwable) {
+            // Fallback for sandboxed emulators or custom ROMs where KeyStore might be restricted
             context.getSharedPreferences("localbots_vault_fallback", Context.MODE_PRIVATE)
         }
     }

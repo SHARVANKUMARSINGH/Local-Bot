@@ -62,7 +62,22 @@ public class LegacyProcessBridge {
 
         Map<String, String> env = pb.environment();
         env.put("LANG", "en_US.UTF-8");
-        env.put("PATH", "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:" + env.get("PATH"));
+        env.put("DISPLAY", ":1");
+
+        String filesDir = "";
+        try {
+            filesDir = com.localbots.app.LocalBotsApp.Companion.getInstance().getFilesDir().getAbsolutePath();
+        } catch (Exception ignored) {}
+
+        String appPaths = "";
+        if (!filesDir.isEmpty()) {
+            appPaths = filesDir + "/rootfs/bin:" + filesDir + "/rootfs/usr/bin:" + filesDir + "/bin:";
+            env.put("HOME", filesDir + "/rootfs/root");
+            env.put("TMPDIR", filesDir + "/rootfs/tmp");
+        }
+
+        String existingPath = env.get("PATH");
+        env.put("PATH", appPaths + "/system/bin:/system/xbin:/usr/local/bin:/usr/bin:/bin" + (existingPath != null ? ":" + existingPath : ""));
         if (extraEnv != null) {
             env.putAll(extraEnv);
         }

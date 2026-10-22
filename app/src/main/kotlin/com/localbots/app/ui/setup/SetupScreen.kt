@@ -63,7 +63,9 @@ fun SetupScreen(
 
     LaunchedEffect(state.terminalLogs.size) {
         if (state.terminalLogs.isNotEmpty()) {
-            terminalListState.animateScrollToItem(state.terminalLogs.size - 1)
+            try {
+                terminalListState.scrollToItem(state.terminalLogs.size - 1)
+            } catch (ignored: Exception) {}
         }
     }
 

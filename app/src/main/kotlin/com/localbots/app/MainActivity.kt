@@ -34,7 +34,7 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
 
         val app = application as LocalBotsApp
-        val setupViewModel = SetupViewModel(this, app.settingsRepository)
+        val setupViewModel = SetupViewModel(applicationContext, app.settingsRepository)
         val dashboardViewModel = DashboardViewModel(app.projectRepository)
         val chatViewModel = ChatViewModel(app.projectRepository, app.settingsRepository, app.agentOrchestrator)
         val vfsViewModel = VfsViewModel(app.projectRepository, app.vfsRepository)

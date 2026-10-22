@@ -1,6 +1,7 @@
 package com.localbots.app
 
 import android.app.Application
+import android.util.Log
 import com.localbots.app.data.repository.ProjectRepository
 import com.localbots.app.data.repository.SettingsRepository
 import com.localbots.app.data.repository.VfsRepository
@@ -33,31 +34,49 @@ class LocalBotsApp : Application() {
         super.onCreate()
         instance = this
 
-        // 1. Initialize Theme Engine & Local Time Ticker
-        ThemeManager.initialize(this)
+        try {
+            // 1. Initialize Theme Engine & Local Time Ticker
+            ThemeManager.initialize(this)
+        } catch (t: Throwable) {
+            Log.e("LocalBotsApp", "ThemeManager init error", t)
+        }
 
-        // 2. Initialize Repositories & Key Vault
-        projectRepository = ProjectRepository(this)
-        settingsRepository = SettingsRepository(this)
-        vfsRepository = VfsRepository()
-        secureKeyVault = SecureKeyVault(this)
+        try {
+            // 2. Initialize Repositories & Key Vault
+            projectRepository = ProjectRepository(this)
+            settingsRepository = SettingsRepository(this)
+            vfsRepository = VfsRepository()
+            secureKeyVault = SecureKeyVault(this)
+        } catch (t: Throwable) {
+            Log.e("LocalBotsApp", "Repositories init error", t)
+        }
 
-        // 3. Initialize Agent Engine & Native Bridge
-        cliWrapper = AntigravityCliWrapper(this, settingsRepository)
-        actionDispatcher = ActionDispatcher(this, vfsRepository)
-        agentOrchestrator = AgentOrchestrator(
-            context = this,
-            projectRepository = projectRepository,
-            settingsRepository = settingsRepository,
-            vfsRepository = vfsRepository,
-            secureKeyVault = secureKeyVault,
-            actionDispatcher = actionDispatcher
-        )
+        try {
+            // 3. Initialize Agent Engine & Native Bridge
+            cliWrapper = AntigravityCliWrapper(this, settingsRepository)
+            actionDispatcher = ActionDispatcher(this, vfsRepository)
+            agentOrchestrator = AgentOrchestrator(
+                context = this,
+                projectRepository = projectRepository,
+                settingsRepository = settingsRepository,
+                vfsRepository = vfsRepository,
+                secureKeyVault = secureKeyVault,
+                actionDispatcher = actionDispatcher
+            )
+        } catch (t: Throwable) {
+            Log.e("LocalBotsApp", "AgentOrchestrator init error", t)
+        }
 
-        // 4. Initialize Native Proot Environment paths
-        val rootfsDir = File(filesDir, "rootfs")
-        val vfsDir = File(filesDir, "vfs")
-        NativeBridge.initEnvironment(rootfsDir.absolutePath, vfsDir.absolutePath)
+        try {
+            // 4. Initialize Native Proot Environment paths
+            val rootfsDir = File(filesDir, "rootfs")
+            val vfsDir = File(filesDir, "vfs")
+            rootfsDir.mkdirs()
+            vfsDir.mkdirs()
+            NativeBridge.initEnvironment(rootfsDir.absolutePath, vfsDir.absolutePath)
+        } catch (t: Throwable) {
+            Log.e("LocalBotsApp", "NativeBridge init error", t)
+        }
     }
 
     companion object {

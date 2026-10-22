@@ -115,13 +115,22 @@ object NativeBridge {
     }
 
     fun checkBinary(binaryName: String): Boolean {
-        return if (isNativeLoaded) {
-            try { nativeCheckBinary(binaryName) } catch (e: Exception) {
-                executeCommand("which $binaryName", 5).isSuccess
-            }
-        } else {
-            executeCommand("which $binaryName", 5).isSuccess
+        try {
+            val app = com.localbots.app.LocalBotsApp.instance
+            val rootfsBin = File(app.filesDir, "rootfs/bin/$binaryName")
+            if (rootfsBin.exists()) return true
+            val usrBin = File(app.filesDir, "rootfs/usr/bin/$binaryName")
+            if (usrBin.exists()) return true
+            val appBin = File(app.filesDir, "bin/$binaryName")
+            if (appBin.exists()) return true
+        } catch (ignored: Exception) {}
+
+        if (isNativeLoaded) {
+            try {
+                if (nativeCheckBinary(binaryName)) return true
+            } catch (ignored: Exception) {}
         }
+        return executeCommand("which $binaryName", 5).isSuccess
     }
 
     fun mountVfs(hostPath: String, guestPath: String): Boolean {
