@@ -1,0 +1,86 @@
+name: Build Local Bots Android APKs
+
+on:
+  push:
+    branches: [ "main", "master" ]
+  pull_request:
+    branches: [ "main", "master" ]
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build Multi-Architecture APKs
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Set up JDK 17 (Temurin)
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+          cache: 'gradle'
+
+      - name: Setup Android SDK and NDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android NDK & CMake
+        run: |
+          yes | sdkmanager --licenses || true
+          sdkmanager --install "ndk;26.1.10909125" "cmake;3.22.1" "build-tools;35.0.0" "platforms;android-35"
+
+      - name: Grant Execute Permission to Gradlew
+        run: chmod +x gradlew || true
+
+      - name: Compile and Assemble Debug APKs (Multi-ABI Splits)
+        run: |
+          ./gradlew assembleDebug --stacktrace --no-daemon
+
+      - name: Identify and Organize Generated APKs
+        run: |
+          mkdir -p build-artifacts
+          find app/build/outputs/apk/debug/ -type f -name "*.apk" -exec cp {} build-artifacts/ \;
+          echo "=== Built APK Artifacts ==="
+          ls -la build-artifacts/
+
+      - name: Upload arm64-v8a APK (Primary aarch64)
+        uses: actions/upload-artifact@v4
+        with:
+          name: LocalBots-arm64-v8a-debug
+          path: build-artifacts/*arm64-v8a*.apk
+          if-no-files-found: warn
+
+      - name: Upload armeabi-v7a APK (32-bit ARM)
+        uses: actions/upload-artifact@v4
+        with:
+          name: LocalBots-armeabi-v7a-debug
+          path: build-artifacts/*armeabi-v7a*.apk
+          if-no-files-found: warn
+
+      - name: Upload x86_64 APK (PC / Emulator / Waydroid)
+        uses: actions/upload-artifact@v4
+        with:
+          name: LocalBots-x86_64-debug
+          path: build-artifacts/*x86_64*.apk
+          if-no-files-found: warn
+
+      - name: Upload Universal APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: LocalBots-universal-debug
+          path: build-artifacts/*universal*.apk
+          if-no-files-found: warn
+
+      - name: Upload All Build APKs Bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: LocalBots-All-APKs
+          path: build-artifacts/*.apk

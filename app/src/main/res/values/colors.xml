@@ -1,0 +1,20 @@
+<resources>
+    <!-- Google Brand Palette -->
+    <color name="google_blue_primary">#4285F4</color>
+    <color name="google_blue_dark">#8AB4F8</color>
+    <color name="google_red">#EA4335</color>
+    <color name="google_yellow">#FBBC04</color>
+    <color name="google_green">#34A853</color>
+
+    <!-- Day Palette -->
+    <color name="day_background">#FFFFFF</color>
+    <color name="day_surface">#F8F9FA</color>
+    <color name="day_surface_variant">#F1F3F4</color>
+    <color name="day_on_surface">#1F1F1F</color>
+
+    <!-- Night Palette -->
+    <color name="night_background">#131314</color>
+    <color name="night_surface">#1E1F20</color>
+    <color name="night_surface_variant">#2D2F31</color>
+    <color name="night_on_surface">#E3E3E3</color>
+</resources>

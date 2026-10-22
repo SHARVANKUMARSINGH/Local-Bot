@@ -1,0 +1,9 @@
+<resources>
+    <string name="app_name">Local Bots</string>
+    <string name="tagline">Local Autonomous AI Computer-Use Agent</string>
+    <string name="setup_title">Initializing Linux Runtime</string>
+    <string name="dashboard_title">Agent Projects</string>
+    <string name="chat_title">Agent Workspace</string>
+    <string name="vfs_title">Virtual File System</string>
+    <string name="settings_title">Settings &amp; Connectors</string>
+</resources>
