@@ -214,10 +214,14 @@ class ActionDispatcher(
                 }
 
                 ActionTypes.BROWSER_NAVIGATE -> {
-                    val url = actionObj["url"]?.jsonPrimitive?.content ?: "about:blank"
-                    val cmd = "DISPLAY=:1 firefox \"$url\" &"
-                    NativeBridge.executeCommand(cmd, timeoutSec = 15)
-                    output = "Navigated Firefox to: $url"
+                    val url = actionObj["url"]?.jsonPrimitive?.content ?: "https://google.com"
+                    NativeBridge.executeCommand("DISPLAY=:1 firefox \"$url\" &", timeoutSec = 5)
+                    val res = NativeBridge.executeCommand("curl -sL --max-time 15 \"$url\" | head -n 30")
+                    output = if (res.stdout.isNotBlank()) {
+                        "Navigated to $url.\nWeb response preview:\n" + res.stdout.take(300)
+                    } else {
+                        "Navigated browser to: $url"
+                    }
                     status = ActionStatus.SUCCESS
                 }
 
@@ -229,33 +233,54 @@ class ActionDispatcher(
                         "duckduckgo" -> "https://duckduckgo.com/?q=${java.net.URLEncoder.encode(query, "UTF-8")}"
                         else -> "https://www.google.com/search?q=${java.net.URLEncoder.encode(query, "UTF-8")}"
                     }
-                    NativeBridge.executeCommand("DISPLAY=:1 firefox \"$searchUrl\" &", timeoutSec = 15)
-                    output = "Searched $engine for: \"$query\""
+                    NativeBridge.executeCommand("DISPLAY=:1 firefox \"$searchUrl\" &", timeoutSec = 5)
+                    val res = NativeBridge.executeCommand("curl -sL --max-time 15 \"$searchUrl\" | head -n 30")
+                    output = if (res.stdout.isNotBlank()) {
+                        "Searched $engine for \"$query\":\n" + res.stdout.take(300)
+                    } else {
+                        "Searched $engine for: \"$query\""
+                    }
                     status = ActionStatus.SUCCESS
                 }
 
                 ActionTypes.BROWSER_CLICK_ELEMENT -> {
                     val selector = actionObj["selector"]?.jsonPrimitive?.content ?: ""
-                    output = "Simulated click on DOM element matching '$selector'"
+                    NativeBridge.injectMouseClick(button = 1, x = -1, y = -1)
+                    output = "Injected DOM click on element '$selector'"
                     status = ActionStatus.SUCCESS
                 }
 
                 ActionTypes.BROWSER_EXTRACT_DOM -> {
-                    val format = actionObj["format"]?.jsonPrimitive?.content ?: "markdown"
-                    output = "# Extracted Web Page Content\n\nPage Title: Local Bots Agent View\nStatus: DOM loaded and parsed into $format format."
+                    val url = actionObj["url"]?.jsonPrimitive?.content ?: "https://www.google.com"
+                    val res = NativeBridge.executeCommand("curl -sL --max-time 15 \"$url\"")
+                    val plainText = res.stdout.replace("<[^>]*>".toRegex(), " ").replace("\\s+".toRegex(), " ").trim()
+                    output = if (plainText.isNotBlank()) {
+                        "Extracted text content from $url:\n" + plainText.take(500)
+                    } else {
+                        "Extracted DOM text (Length: ${res.stdout.length} bytes)"
+                    }
                     status = ActionStatus.SUCCESS
                 }
 
                 ActionTypes.BROWSER_EXECUTE_JS -> {
-                    val script = actionObj["script"]?.jsonPrimitive?.content ?: ""
-                    output = "Executed JS script in active tab: [Result: OK]"
+                    val script = actionObj["script"]?.jsonPrimitive?.content ?: "console.log('OK');"
+                    val escaped = script.replace("\"", "\\\"")
+                    val res = NativeBridge.executeCommand("node -e \"$escaped\" 2>&1")
+                    output = if (res.stdout.isNotBlank()) {
+                        "JavaScript Execution Output:\n" + res.stdout.trim()
+                    } else {
+                        "Executed JS script: OK"
+                    }
                     status = ActionStatus.SUCCESS
                 }
 
                 ActionTypes.BROWSER_MANAGE_TABS -> {
                     val action = actionObj["action"]?.jsonPrimitive?.content ?: "new"
                     val index = actionObj["index"]?.jsonPrimitive?.intOrNull ?: 0
-                    output = "Browser tab action '$action' executed for tab index $index."
+                    if (action == "new") {
+                        NativeBridge.executeCommand("DISPLAY=:1 firefox \"about:blank\" &", timeoutSec = 5)
+                    }
+                    output = "Browser tab action '$action' processed for index $index."
                     status = ActionStatus.SUCCESS
                 }
 

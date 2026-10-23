@@ -91,7 +91,7 @@ fun ActionChip(
     action: AgentActionExecution,
     modifier: Modifier = Modifier
 ) {
-    var isExpanded by remember { mutableStateOf(false) }
+    var isExpanded by remember { mutableStateOf(true) }
     val icon = getIconForAction(action.actionName)
 
     Surface(

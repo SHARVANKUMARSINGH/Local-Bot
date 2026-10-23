@@ -39,12 +39,28 @@ CommandResult ProotExecutor::executeInProot(const std::string& rootfsPath, const
     ALOGD("ProotExecutor executing command: %s (rootfs: %s, timeout: %ds)",
           command.c_str(), rootfsPath.c_str(), timeoutSeconds);
 
-    // On modern Android (API 29+), raw fork() is blocked by seccomp in app processes.
-    // ProotExecutor logs command and returns clean execution status, while real process
-    // execution is safely handled via LegacyProcessBridge / ProcessBuilder in Java/Kotlin.
-    result.exitCode = 0;
-    result.stdoutOutput = "[localbots-proot] Command executed: " + command + "\n";
-    result.stderrOutput = "";
+    // Execute via POSIX popen with stderr redirected to stdout
+    std::string fullCmd = command + " 2>&1";
+    FILE* pipe = popen(fullCmd.c_str(), "r");
+    if (!pipe) {
+        result.exitCode = -1;
+        result.stderrOutput = "Failed to spawn popen process";
+        result.stdoutOutput = "";
+    } else {
+        std::array<char, 512> buffer;
+        std::string output;
+        while (fgets(buffer.data(), buffer.size(), pipe) != nullptr) {
+            output += buffer.data();
+        }
+        int status = pclose(pipe);
+        if (WIFEXITED(status)) {
+            result.exitCode = WEXITSTATUS(status);
+        } else {
+            result.exitCode = -1;
+        }
+        result.stdoutOutput = output;
+        result.stderrOutput = "";
+    }
 
     auto endTime = std::chrono::steady_clock::now();
     result.durationSeconds = std::chrono::duration<double>(endTime - startTime).count();

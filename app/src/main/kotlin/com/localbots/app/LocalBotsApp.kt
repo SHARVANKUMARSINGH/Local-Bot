@@ -56,11 +56,16 @@ class LocalBotsApp : Application() {
         }
 
         try {
-            // Ensure filesystem directories exist
+            // Ensure filesystem directories exist and deploy native CLI tools
             val rootfsDir = File(filesDir, "rootfs")
             val vfsDir = File(filesDir, "vfs")
+            val binDir = File(filesDir, "bin")
             rootfsDir.mkdirs()
             vfsDir.mkdirs()
+            binDir.mkdirs()
+
+            // Ensure Antigravity CLI and agy binaries are deployed and executable
+            cliWrapper.ensureCliInstalled()
         } catch (t: Throwable) {
             Log.e("LocalBotsApp", "FilesDir init error", t)
         }

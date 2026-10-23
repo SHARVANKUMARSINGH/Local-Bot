@@ -106,11 +106,32 @@ class AgentOrchestrator(
             executedActions.add(exec)
         }
 
-        // Clean user-facing text
+        // Clean user-facing text and append real execution outputs directly to chat text
         val userFacingText = cleanRawJsonFromResponse(rawLlmResponse)
 
+        val finalContent = buildString {
+            if (userFacingText.isNotBlank()) {
+                append(userFacingText)
+            }
+            if (executedActions.isNotEmpty()) {
+                for (act in executedActions) {
+                    val out = act.output?.trim()
+                    val err = act.error?.trim()
+                    if (!out.isNullOrBlank()) {
+                        append("\n\n**[${act.actionName}] Output:**\n```\n")
+                        append(out)
+                        append("\n```")
+                    } else if (!err.isNullOrBlank()) {
+                        append("\n\n**[${act.actionName}] Error:**\n```\n")
+                        append(err)
+                        append("\n```")
+                    }
+                }
+            }
+        }.trim().ifBlank { "Task executed successfully." }
+
         assistantMessage = assistantMessage.copy(
-            content = userFacingText.ifBlank { "Task executed successfully." },
+            content = finalContent,
             actions = executedActions,
             isStreaming = false
         )
