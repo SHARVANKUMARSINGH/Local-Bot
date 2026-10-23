@@ -219,30 +219,6 @@ class AntigravityCliWrapper(
     }
 
     /**
-     * Authenticates with Google Account using a token or identifier.
-     */
-    suspend fun authenticateWithOtt(
-        oneTimeToken: String
-    ): Result<String> = withContext(Dispatchers.IO) {
-        try {
-            if (oneTimeToken.isBlank()) {
-                return@withContext Result.failure(IllegalArgumentException("Token cannot be empty."))
-            }
-
-            val accountEmail = if (oneTimeToken.contains("@")) {
-                oneTimeToken.trim()
-            } else {
-                "google.user@gmail.com"
-            }
-
-            settingsRepository.setGoogleAuth(true, accountEmail)
-            Result.success(accountEmail)
-        } catch (e: Exception) {
-            Result.failure(e)
-        }
-    }
-
-    /**
      * Syncs available Gemini models from Antigravity CLI.
      */
     suspend fun syncGeminiModels(): List<String> = withContext(Dispatchers.IO) {
