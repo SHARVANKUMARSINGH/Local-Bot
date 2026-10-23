@@ -4,9 +4,11 @@ import android.content.Context
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 
+@Serializable
 data class AppSettings(
     val isSetupCompleted: Boolean = false,
     val isCliInstalled: Boolean = false,
@@ -27,7 +29,7 @@ data class AppSettings(
 
 class SettingsRepository(private val context: Context) {
 
-    private val json = Json { ignoreUnknownKeys = true }
+    private val json = Json { ignoreUnknownKeys = true; encodeDefaults = true }
     private val prefs = context.getSharedPreferences("localbots_settings", Context.MODE_PRIVATE)
 
     private val _settings = MutableStateFlow(loadSettings())
@@ -45,7 +47,11 @@ class SettingsRepository(private val context: Context) {
 
     private fun saveSettings(appSettings: AppSettings) {
         _settings.value = appSettings
-        prefs.edit().putString("settings_data", json.encodeToString(appSettings)).apply()
+        try {
+            prefs.edit().putString("settings_data", json.encodeToString(appSettings)).apply()
+        } catch (e: Exception) {
+            android.util.Log.e("SettingsRepository", "Failed to save settings to SharedPreferences", e)
+        }
     }
 
     fun setSetupCompleted(completed: Boolean) {

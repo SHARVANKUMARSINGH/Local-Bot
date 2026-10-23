@@ -2,6 +2,7 @@ package com.localbots.app
 
 import com.localbots.app.data.model.ApiKeyConfig
 import com.localbots.app.data.model.DefaultConnectors
+import com.localbots.app.data.repository.AppSettings
 import com.localbots.app.theme.ThemeManager
 import com.localbots.app.theme.ThemeMode
 import com.localbots.app.ui.navigation.Screen
@@ -73,5 +74,32 @@ class StabilityVerificationTest {
         assertTrue(Screen.bottomNavRoutes.contains("chat"))
         assertTrue(Screen.bottomNavRoutes.contains("vfs"))
         assertTrue(Screen.bottomNavRoutes.contains("settings"))
+    }
+
+    @Test
+    fun testAppSettingsSerializationCycle() {
+        val original = AppSettings(
+            isSetupCompleted = true,
+            isCliInstalled = true,
+            cliVersion = "v1.4.2",
+            isLoggedInGoogle = true,
+            googleUserEmail = "developer@example.com",
+            selectedModel = "Gemini 3.8 Flash",
+            availableModels = listOf("Gemini 3.8 Flash", "Gemini 3.8 Pro"),
+            lastUpdateCheck = 1700000000000L
+        )
+
+        val serialized = json.encodeToString(original)
+        assertTrue("Serialized string must contain email", serialized.contains("developer@example.com"))
+        val deserialized = json.decodeFromString<AppSettings>(serialized)
+
+        assertEquals(original.isSetupCompleted, deserialized.isSetupCompleted)
+        assertEquals(original.isCliInstalled, deserialized.isCliInstalled)
+        assertEquals(original.cliVersion, deserialized.cliVersion)
+        assertEquals(original.isLoggedInGoogle, deserialized.isLoggedInGoogle)
+        assertEquals(original.googleUserEmail, deserialized.googleUserEmail)
+        assertEquals(original.selectedModel, deserialized.selectedModel)
+        assertEquals(original.availableModels, deserialized.availableModels)
+        assertEquals(original.lastUpdateCheck, deserialized.lastUpdateCheck)
     }
 }

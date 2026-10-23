@@ -29,6 +29,16 @@ if [ -z "$PID" ]; then
 fi
 
 echo "✓ Local Bots app is running stably on QEMU Android Emulator with PID $PID!"
+
+echo "=== Top Activity Information ==="
+adb shell dumpsys activity activities | grep -E "mResumedActivity|topResumedActivity|mFocusedApp" || true
+
+echo "=== Capturing Smoke Test Screenshot ==="
+adb exec-out screencap -p > app_smoke_test.png || true
+if [ -f app_smoke_test.png ]; then
+    ls -lh app_smoke_test.png
+fi
+
 echo "Recent Local Bots Logcat:"
-adb logcat -d | grep -i -E "LocalBots|MainActivity|ThemeManager" || true
+adb logcat -d | grep -i -E "LocalBots|MainActivity|ThemeManager|SettingsRepository|SetupViewModel" || true
 exit 0
