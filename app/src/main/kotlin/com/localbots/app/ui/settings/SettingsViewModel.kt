@@ -24,6 +24,7 @@ data class SettingsUiState(
     val ottInput: String = "",
     val ottLoading: Boolean = false,
     val ottError: String? = null,
+    val googleAuthSuccessMessage: String? = null,
     val themeState: ThemeState = ThemeState()
 )
 
@@ -64,6 +65,62 @@ class SettingsViewModel(
                 cliWrapper.syncGeminiModels()
             }
             _uiState.value = _uiState.value.copy(isUpdatingCli = false)
+        }
+    }
+
+    fun onGoogleAccountSelected(email: String) {
+        viewModelScope.launch {
+            _uiState.value = _uiState.value.copy(ottLoading = true, ottError = null)
+            val result = cliWrapper.authenticateWithGoogleAccount(email)
+            if (result.isSuccess) {
+                cliWrapper.syncGeminiModels()
+                _uiState.value = _uiState.value.copy(
+                    ottLoading = false,
+                    ottDialogVisible = false,
+                    googleAuthSuccessMessage = "Connected to $email"
+                )
+            } else {
+                _uiState.value = _uiState.value.copy(
+                    ottLoading = false,
+                    ottError = result.exceptionOrNull()?.message ?: "Failed to connect Google account."
+                )
+            }
+        }
+    }
+
+    fun signOutGoogle() {
+        cliWrapper.signOutGoogle()
+        _uiState.value = _uiState.value.copy(googleAuthSuccessMessage = null)
+    }
+
+    fun authenticateWithGoogleKey(apiKey: String) {
+        viewModelScope.launch {
+            _uiState.value = _uiState.value.copy(ottLoading = true, ottError = null)
+            val result = cliWrapper.validateGoogleGeminiKey(apiKey)
+            if (result.isSuccess) {
+                // Also update Slot 1 in SecureKeyVault
+                val slot1 = _uiState.value.keySlots.find { it.slotNumber == 1 }
+                if (slot1 != null) {
+                    secureKeyVault.updateSlot(
+                        slot1.copy(
+                            apiKey = apiKey.trim(),
+                            isEnabled = true,
+                            isHealthy = true,
+                            lastError = null
+                        )
+                    )
+                }
+                _uiState.value = _uiState.value.copy(
+                    ottLoading = false,
+                    ottDialogVisible = false,
+                    googleAuthSuccessMessage = "Google Gemini Key Verified & Activated"
+                )
+            } else {
+                _uiState.value = _uiState.value.copy(
+                    ottLoading = false,
+                    ottError = result.exceptionOrNull()?.message ?: "Invalid Google Gemini Key."
+                )
+            }
         }
     }
 

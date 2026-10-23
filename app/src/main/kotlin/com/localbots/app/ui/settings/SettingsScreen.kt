@@ -1,5 +1,11 @@
 package com.localbots.app.ui.settings
 
+import android.accounts.AccountManager
+import android.app.Activity
+import android.content.Intent
+import android.net.Uri
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -25,6 +31,8 @@ import androidx.compose.material.icons.rounded.CloudSync
 import androidx.compose.material.icons.rounded.DarkMode
 import androidx.compose.material.icons.rounded.Key
 import androidx.compose.material.icons.rounded.LightMode
+import androidx.compose.material.icons.rounded.Logout
+import androidx.compose.material.icons.rounded.OpenInNew
 import androidx.compose.material.icons.rounded.Palette
 import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material.icons.rounded.Schedule
@@ -60,6 +68,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -73,9 +82,38 @@ fun SettingsScreen(
     viewModel: SettingsViewModel,
     modifier: Modifier = Modifier
 ) {
+    val context = LocalContext.current
     val state by viewModel.uiState.collectAsState()
     var editingSlot by remember { mutableStateOf<ApiKeyConfig?>(null) }
     var modelMenuExpanded by remember { mutableStateOf(false) }
+
+    val accountPickerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        if (result.resultCode == Activity.RESULT_OK && result.data != null) {
+            val accountName = result.data?.getStringExtra(AccountManager.KEY_ACCOUNT_NAME)
+            if (!accountName.isNullOrBlank()) {
+                viewModel.onGoogleAccountSelected(accountName)
+            }
+        }
+    }
+
+    fun launchGoogleSignIn() {
+        try {
+            val intent = AccountManager.newChooseAccountIntent(
+                null,
+                null,
+                arrayOf("com.google"),
+                null,
+                null,
+                null,
+                null
+            )
+            accountPickerLauncher.launch(intent)
+        } catch (e: Exception) {
+            viewModel.showOttDialog()
+        }
+    }
 
     Scaffold(
         modifier = modifier.fillMaxSize(),
@@ -184,45 +222,68 @@ fun SettingsScreen(
                         if (state.appSettings.isLoggedInGoogle) {
                             Surface(
                                 modifier = Modifier.fillMaxWidth(),
-                                shape = RoundedCornerShape(10.dp),
-                                color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.6f)
+                                shape = RoundedCornerShape(12.dp),
+                                color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.7f)
                             ) {
                                 Row(
-                                    modifier = Modifier.padding(12.dp),
+                                    modifier = Modifier.padding(14.dp),
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
                                     Icon(
                                         imageVector = Icons.Rounded.CheckCircle,
                                         contentDescription = null,
                                         tint = MaterialTheme.colorScheme.primary,
-                                        modifier = Modifier.size(20.dp)
+                                        modifier = Modifier.size(22.dp)
                                     )
-                                    Spacer(modifier = Modifier.width(10.dp))
-                                    Column {
+                                    Spacer(modifier = Modifier.width(12.dp))
+                                    Column(modifier = Modifier.weight(1f)) {
                                         Text(
-                                            text = "Logged in with Google Account",
-                                            style = MaterialTheme.typography.labelMedium,
+                                            text = "Logged In with Google",
+                                            style = MaterialTheme.typography.labelLarge,
                                             fontWeight = FontWeight.Bold,
                                             color = MaterialTheme.colorScheme.onPrimaryContainer
                                         )
                                         Text(
-                                            text = "Using ${state.appSettings.selectedModel} • ${state.appSettings.googleUserEmail}",
+                                            text = "${state.appSettings.googleUserEmail ?: "Google Account"}\nModel: ${state.appSettings.selectedModel}",
                                             style = MaterialTheme.typography.labelSmall,
-                                            color = MaterialTheme.colorScheme.onPrimaryContainer
+                                            color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.8f)
+                                        )
+                                    }
+                                    IconButton(
+                                        onClick = { viewModel.signOutGoogle() }
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Rounded.Logout,
+                                            contentDescription = "Sign Out",
+                                            tint = MaterialTheme.colorScheme.error
                                         )
                                     }
                                 }
                             }
                         } else {
-                            Button(
-                                onClick = { viewModel.showOttDialog() },
+                            Column(
                                 modifier = Modifier.fillMaxWidth(),
-                                shape = RoundedCornerShape(10.dp),
-                                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
+                                verticalArrangement = Arrangement.spacedBy(8.dp)
                             ) {
-                                Icon(imageVector = Icons.Rounded.AccountCircle, contentDescription = null)
-                                Spacer(modifier = Modifier.width(8.dp))
-                                Text("Sign In with Google OTT (One-Time Token)")
+                                Button(
+                                    onClick = { launchGoogleSignIn() },
+                                    modifier = Modifier.fillMaxWidth(),
+                                    shape = RoundedCornerShape(12.dp),
+                                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
+                                ) {
+                                    Icon(imageVector = Icons.Rounded.AccountCircle, contentDescription = null)
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Text("Sign In with Google Account", fontWeight = FontWeight.Bold)
+                                }
+
+                                TextButton(
+                                    onClick = { viewModel.showOttDialog() },
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    Icon(imageVector = Icons.Rounded.Key, contentDescription = null, modifier = Modifier.size(16.dp))
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Text("Or Link Google Gemini API Key", style = MaterialTheme.typography.labelMedium)
+                                }
                             }
                         }
 
@@ -495,15 +556,15 @@ fun SettingsScreen(
             )
         }
 
-        // Google OTT Sign-in Dialog
+        // Real Google Account / Gemini Key Dialog
         if (state.ottDialogVisible) {
             AlertDialog(
                 onDismissRequest = { viewModel.dismissOttDialog() },
-                title = { Text("Sign In with Google OTT") },
+                title = { Text("Link Google Gemini Account") },
                 text = {
                     Column {
                         Text(
-                            text = "Enter your Google One-Time Token (OTT) or Google account email to link with Antigravity CLI and Gemini 3.8 Flash:",
+                            text = "Connect with your real Google account email, Google OAuth token, or official Google AI Studio Gemini API Key:",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
@@ -511,13 +572,30 @@ fun SettingsScreen(
                         OutlinedTextField(
                             value = state.ottInput,
                             onValueChange = { viewModel.onOttInputChanged(it) },
-                            label = { Text("One-Time Token (OTT)") },
-                            placeholder = { Text("ott_gemini_token_...") },
+                            label = { Text("Google Account / Gemini Key") },
+                            placeholder = { Text("AIzaSy... or your.email@gmail.com") },
                             singleLine = true,
                             modifier = Modifier.fillMaxWidth()
                         )
+                        Spacer(modifier = Modifier.height(6.dp))
+                        TextButton(
+                            onClick = {
+                                try {
+                                    val browserIntent = Intent(
+                                        Intent.ACTION_VIEW,
+                                        Uri.parse("https://aistudio.google.com/app/apikey")
+                                    )
+                                    context.startActivity(browserIntent)
+                                } catch (ignored: Exception) {}
+                            },
+                            modifier = Modifier.align(Alignment.End)
+                        ) {
+                            Icon(Icons.Rounded.OpenInNew, contentDescription = null, modifier = Modifier.size(14.dp))
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text("Get Free Key at Google AI Studio", style = MaterialTheme.typography.labelSmall)
+                        }
                         if (state.ottError != null) {
-                            Spacer(modifier = Modifier.height(6.dp))
+                            Spacer(modifier = Modifier.height(4.dp))
                             Text(
                                 text = state.ottError!!,
                                 style = MaterialTheme.typography.labelSmall,
@@ -528,13 +606,20 @@ fun SettingsScreen(
                 },
                 confirmButton = {
                     Button(
-                        onClick = { viewModel.submitOttSignIn() },
+                        onClick = {
+                            val input = state.ottInput.trim()
+                            if (input.startsWith("AIzaSy")) {
+                                viewModel.authenticateWithGoogleKey(input)
+                            } else {
+                                viewModel.submitOttSignIn()
+                            }
+                        },
                         enabled = !state.ottLoading
                     ) {
                         if (state.ottLoading) {
                             CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
                         } else {
-                            Text("Authenticate")
+                            Text("Verify & Connect")
                         }
                     }
                 },

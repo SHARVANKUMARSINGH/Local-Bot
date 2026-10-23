@@ -82,6 +82,7 @@ fun getVfsIcon(node: VfsNode): ImageVector {
 @Composable
 fun VfsExplorerScreen(
     viewModel: VfsViewModel,
+    onBack: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val state by viewModel.uiState.collectAsState()
@@ -126,6 +127,10 @@ fun VfsExplorerScreen(
                     if (state.currentPath.isNotBlank()) {
                         IconButton(onClick = { viewModel.navigateUp() }) {
                             Icon(imageVector = Icons.Rounded.ArrowBack, contentDescription = "Up")
+                        }
+                    } else {
+                        IconButton(onClick = onBack) {
+                            Icon(imageVector = Icons.Rounded.ArrowBack, contentDescription = "Back to Project")
                         }
                     }
                 },

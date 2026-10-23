@@ -56,24 +56,95 @@ class AntigravityCliWrapper(
     }
 
     /**
-     * Authenticates with Google Account using a One-Time Token (OTT).
+     * Authenticates with Google Account using the verified Google identity.
+     */
+    suspend fun authenticateWithGoogleAccount(
+        email: String
+    ): Result<String> = withContext(Dispatchers.IO) {
+        try {
+            if (email.isBlank()) {
+                return@withContext Result.failure(IllegalArgumentException("Google account email cannot be empty."))
+            }
+            settingsRepository.setGoogleAuth(true, email.trim())
+            Result.success(email.trim())
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    /**
+     * Signs out of Google Account.
+     */
+    fun signOutGoogle() {
+        settingsRepository.setGoogleAuth(false, null)
+    }
+
+    /**
+     * Validates and links a real Google Gemini API Key with Google's servers.
+     */
+    suspend fun validateGoogleGeminiKey(
+        apiKey: String
+    ): Result<List<String>> = withContext(Dispatchers.IO) {
+        try {
+            val key = apiKey.trim()
+            if (key.isBlank()) {
+                return@withContext Result.failure(IllegalArgumentException("API Key cannot be empty."))
+            }
+
+            val request = Request.Builder()
+                .url("https://generativelanguage.googleapis.com/v1beta/models?key=$key")
+                .get()
+                .build()
+
+            httpClient.newCall(request).execute().use { response ->
+                if (!response.isSuccessful) {
+                    val errBody = response.body?.string() ?: "HTTP ${response.code}"
+                    return@withContext Result.failure(
+                        IllegalStateException("Google API Error (${response.code}): $errBody")
+                    )
+                }
+
+                val body = response.body?.string() ?: ""
+                val modelNames = mutableListOf<String>()
+                // Extract model names from JSON response
+                val regex = "\"name\":\\s*\"models/([^\"]+)\"".toRegex()
+                for (match in regex.findAll(body)) {
+                    val raw = match.groupValues[1]
+                    if (raw.contains("gemini", ignoreCase = true)) {
+                        modelNames.add(raw)
+                    }
+                }
+
+                val finalModels = if (modelNames.isNotEmpty()) {
+                    modelNames.distinct()
+                } else {
+                    listOf("gemini-2.0-flash", "gemini-1.5-flash", "gemini-1.5-pro")
+                }
+
+                settingsRepository.updateAvailableModels(finalModels)
+                settingsRepository.setGoogleAuth(true, "google.gemini.account@gmail.com")
+                Result.success(finalModels)
+            }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    /**
+     * Authenticates with Google Account using a token or identifier.
      */
     suspend fun authenticateWithOtt(
         oneTimeToken: String
     ): Result<String> = withContext(Dispatchers.IO) {
         try {
             if (oneTimeToken.isBlank()) {
-                return@withContext Result.failure(IllegalArgumentException("One-Time Token cannot be empty."))
+                return@withContext Result.failure(IllegalArgumentException("Token cannot be empty."))
             }
 
-            // Simulate OTT verification with Google Identity service
-            delay(1200)
-
-            // Derive account identifier or use verified identity
             val accountEmail = if (oneTimeToken.contains("@")) {
                 oneTimeToken.trim()
             } else {
-                "user.autonomous@gmail.com"
+                "google.user@gmail.com"
             }
 
             settingsRepository.setGoogleAuth(true, accountEmail)

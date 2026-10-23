@@ -63,17 +63,17 @@ class StabilityVerificationTest {
     @Test
     fun testScreenNavigationItemsNotNull() {
         val navItems = Screen.getBottomNavItems()
-        assertEquals(4, navItems.size)
+        assertEquals(2, navItems.size)
         for (screen in navItems) {
             assertNotNull("Navigation screen must not be null", screen)
             assertTrue("Route must not be empty", screen.route.isNotEmpty())
             assertTrue("Title must not be empty", screen.title.isNotEmpty())
         }
-        assertEquals(4, Screen.bottomNavRoutes.size)
+        assertEquals(2, Screen.bottomNavRoutes.size)
         assertTrue(Screen.bottomNavRoutes.contains("dashboard"))
-        assertTrue(Screen.bottomNavRoutes.contains("chat"))
-        assertTrue(Screen.bottomNavRoutes.contains("vfs"))
         assertTrue(Screen.bottomNavRoutes.contains("settings"))
+        org.junit.Assert.assertFalse(Screen.bottomNavRoutes.contains("chat"))
+        org.junit.Assert.assertFalse(Screen.bottomNavRoutes.contains("vfs"))
     }
 
     @Test

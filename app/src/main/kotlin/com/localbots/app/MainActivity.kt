@@ -145,6 +145,13 @@ class MainActivity : ComponentActivity() {
                             composable(Screen.Chat.route) {
                                 ChatScreen(
                                     viewModel = chatViewModel,
+                                    onBack = {
+                                        try {
+                                            navController.popBackStack()
+                                        } catch (e: Exception) {
+                                            Log.e("MainActivity", "Chat back navigation error", e)
+                                        }
+                                    },
                                     onNavigateToVfs = {
                                         try {
                                             navController.navigate(Screen.Vfs.route)
@@ -157,7 +164,14 @@ class MainActivity : ComponentActivity() {
 
                             composable(Screen.Vfs.route) {
                                 VfsExplorerScreen(
-                                    viewModel = vfsViewModel
+                                    viewModel = vfsViewModel,
+                                    onBack = {
+                                        try {
+                                            navController.popBackStack()
+                                        } catch (e: Exception) {
+                                            Log.e("MainActivity", "VFS back navigation error", e)
+                                        }
+                                    }
                                 )
                             }
 

@@ -15,10 +15,10 @@ sealed class Screen(val route: String, val title: String, val icon: ImageVector)
     data object Settings : Screen("settings", "Settings", Icons.Rounded.Settings)
 
     companion object {
-        val bottomNavRoutes: Set<String> = setOf("dashboard", "chat", "vfs", "settings")
+        val bottomNavRoutes: Set<String> = setOf("dashboard", "settings")
 
         fun getBottomNavItems(): List<Screen> {
-            return listOf(Dashboard, Chat, Vfs, Settings)
+            return listOf(Dashboard, Settings)
         }
     }
 }
