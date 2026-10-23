@@ -27,21 +27,22 @@ class AntigravityCliWrapper(
     private val authConfigFile = File(context.filesDir, ".gemini/antigravity-cli/auth.json")
 
     /**
-     * Generates the real, fully-featured POSIX shell script for Antigravity CLI (agy)
+     * Generates the real, fully-featured POSIX shell script for Antigravity CLI (agy).
+     * Uses @@ placeholder to avoid Kotlin template interpolation errors.
      */
     private fun getCliScriptContent(): String {
-        return """
+        val template = """
 #!/system/bin/sh
 # ==============================================================================
 # Antigravity CLI (agy) - Autonomous Agent & Runtime Tool for Android Linux
 # Version: v1.4.2
 # ==============================================================================
 
-BIN_DIR="$(cd "$(dirname "$0")" && pwd)"
-FILES_DIR="$(cd "$BIN_DIR/.." && pwd)"
-CONFIG_DIR="$FILES_DIR/.gemini/antigravity-cli"
-AUTH_FILE="$CONFIG_DIR/auth.json"
-mkdir -p "$CONFIG_DIR"
+BIN_DIR="@@(cd "@@(dirname "@@0")" && pwd)"
+FILES_DIR="@@(cd "@@BIN_DIR/.." && pwd)"
+CONFIG_DIR="@@FILES_DIR/.gemini/antigravity-cli"
+AUTH_FILE="@@CONFIG_DIR/auth.json"
+mkdir -p "@@CONFIG_DIR"
 
 show_help() {
     cat << 'EOF'
@@ -73,12 +74,12 @@ Examples:
 EOF
 }
 
-cmd="${1:-help}"
+cmd="@@{1:-help}"
 
-case "$cmd" in
+case "@@cmd" in
     --version|-v|version)
-        ARCH="$(uname -m 2>/dev/null || echo 'aarch64')"
-        echo "Antigravity CLI v1.4.2 ($ARCH-linux-android)"
+        ARCH="@@(uname -m 2>/dev/null || echo 'aarch64')"
+        echo "Antigravity CLI v1.4.2 (@@ARCH-linux-android)"
         exit 0
         ;;
     help|--help|-h)
@@ -86,12 +87,12 @@ case "$cmd" in
         exit 0
         ;;
     auth)
-        sub="${2:-status}"
-        case "$sub" in
+        sub="@@{2:-status}"
+        case "@@sub" in
             status)
-                if [ -f "$AUTH_FILE" ]; then
+                if [ -f "@@AUTH_FILE" ]; then
                     echo "Antigravity CLI Status: Authenticated"
-                    cat "$AUTH_FILE" 2>/dev/null || true
+                    cat "@@AUTH_FILE" 2>/dev/null || true
                 else
                     echo "Antigravity CLI Status: Not Logged In"
                     echo "Run 'agy auth login --token <TOKEN>' to authenticate."
@@ -101,40 +102,40 @@ case "$cmd" in
             login)
                 shift 2
                 TOKEN=""
-                while [ $# -gt 0 ]; do
-                    case "$1" in
-                        --token|-t) TOKEN="$2"; shift 2;;
-                        *) TOKEN="$1"; shift;;
+                while [ @@# -gt 0 ]; do
+                    case "@@1" in
+                        --token|-t) TOKEN="@@2"; shift 2;;
+                        *) TOKEN="@@1"; shift;;
                     esac
                 done
-                if [ -z "$TOKEN" ]; then
+                if [ -z "@@TOKEN" ]; then
                     echo "Error: Token cannot be empty. Usage: agy auth login --token <TOKEN>" >&2
                     exit 1
                 fi
                 EMAIL="antigravity.developer@gmail.com"
-                case "$TOKEN" in
-                    *@*) EMAIL="$TOKEN";;
+                case "@@TOKEN" in
+                    *@*) EMAIL="@@TOKEN";;
                 esac
-                cat << JSON_EOF > "$AUTH_FILE"
+                cat << JSON_EOF > "@@AUTH_FILE"
 {
   "session_type": "antigravity_cli_oauth",
-  "email": "$EMAIL",
-  "token": "$TOKEN",
+  "email": "@@EMAIL",
+  "token": "@@TOKEN",
   "authenticated": true,
-  "created_at": $(date +%s%3N 2>/dev/null || echo "1700000000000")
+  "created_at": 1700000000000
 }
 JSON_EOF
-                chmod 600 "$AUTH_FILE" 2>/dev/null || true
-                echo "Successfully authenticated Antigravity CLI session ($EMAIL)."
+                chmod 600 "@@AUTH_FILE" 2>/dev/null || true
+                echo "Successfully authenticated Antigravity CLI session (@@EMAIL)."
                 exit 0
                 ;;
             logout)
-                rm -f "$AUTH_FILE"
+                rm -f "@@AUTH_FILE"
                 echo "Successfully logged out from Antigravity CLI."
                 exit 0
                 ;;
             *)
-                echo "Unknown auth subcommand: $sub. Use 'status', 'login', or 'logout'." >&2
+                echo "Unknown auth subcommand: @@sub. Use 'status', 'login', or 'logout'." >&2
                 exit 1
                 ;;
         esac
@@ -153,21 +154,21 @@ JSON_EOF
         ;;
     exec)
         shift
-        if [ $# -eq 0 ]; then
+        if [ @@# -eq 0 ]; then
             echo "Error: No command specified to exec." >&2
             exit 1
         fi
-        eval "$@"
-        exit $?
+        eval "@@@"
+        exit @@?
         ;;
     info)
         echo "=== Local Bots & Antigravity Runtime Info ==="
-        echo "OS Kernel: $(uname -s -r -v 2>/dev/null || uname -a)"
-        echo "Architecture: $(uname -m 2>/dev/null || echo 'unknown')"
-        echo "Files Directory: $FILES_DIR"
-        echo "CLI Binary: $BIN_DIR/antigravity-cli"
-        echo "Auth Config: $AUTH_FILE"
-        if [ -f "$AUTH_FILE" ]; then
+        echo "OS Kernel: @@(uname -s -r -v 2>/dev/null || uname -a)"
+        echo "Architecture: @@(uname -m 2>/dev/null || echo 'unknown')"
+        echo "Files Directory: @@FILES_DIR"
+        echo "CLI Binary: @@BIN_DIR/antigravity-cli"
+        echo "Auth Config: @@AUTH_FILE"
+        if [ -f "@@AUTH_FILE" ]; then
             echo "Auth State: Authenticated"
         else
             echo "Auth State: Not Logged In"
@@ -175,11 +176,11 @@ JSON_EOF
         exit 0
         ;;
     vfs)
-        sub="${2:-list}"
-        target="${3:-.}"
-        case "$sub" in
+        sub="@@{2:-list}"
+        target="@@{3:-.}"
+        case "@@sub" in
             list|ls)
-                ls -la "$target"
+                ls -la "@@target"
                 exit 0
                 ;;
             *)
@@ -190,22 +191,23 @@ JSON_EOF
         ;;
     run|agent)
         shift
-        PROMPT="$*"
-        if [ -z "$PROMPT" ]; then
+        PROMPT="@@*"
+        if [ -z "@@PROMPT" ]; then
             echo "Error: Prompt cannot be empty. Usage: agy run <prompt>" >&2
             exit 1
         fi
-        echo "Local Bots Agent Task: $PROMPT"
-        echo "Executing in $(pwd)..."
+        echo "Local Bots Agent Task: @@PROMPT"
+        echo "Executing in @@(pwd)..."
         exit 0
         ;;
     *)
-        echo "Unknown command: $cmd" >&2
+        echo "Unknown command: @@cmd" >&2
         show_help
         exit 1
         ;;
 esac
 """.trimIndent()
+        return template.replace("@@", "$")
     }
 
     /**
