@@ -164,21 +164,4 @@ jobs:
           arch: x86_64
           disable-animations: true
           emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim -camera-back none
-          script: |
-            echo "=== Android Emulator Booted ==="
-            adb devices
-            echo "Installing Built APK..."
-            adb install -r build-artifacts/*.apk
-            echo "Starting MainActivity..."
-            adb shell am start -n com.localbots.app/.MainActivity
-            echo "Waiting for app to initialize..."
-            sleep 15
-            PID=$(adb shell pidof com.localbots.app || true)
-            echo "App Process PID: $PID"
-            if [ -z "$PID" ]; then
-              echo "Error: App process is not running! Checking Logcat for crash:"
-              adb logcat -d | grep -C 5 -E "AndroidRuntime|FATAL|LocalBots"
-              exit 1
-            fi
-            echo "✓ App is running healthy on QEMU Android Emulator!"
-            adb logcat -d | grep -i "LocalBots" || true
+          script: bash ./scripts/test_emulator.sh
