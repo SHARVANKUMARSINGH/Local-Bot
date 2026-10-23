@@ -128,3 +128,57 @@ jobs:
           make_latest: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  qemu-emulator-test:
+    name: Full QEMU / AVD Android Smoke Test
+    runs-on: ubuntu-latest
+    needs: build
+    continue-on-error: true
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17 (Temurin)
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Download x86_64 APK Artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: LocalBots-x86_64-debug
+          path: build-artifacts/
+
+      - name: Enable KVM Hardware Acceleration
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules || true
+          sudo udevadm trigger --name-match=kvm || true
+
+      - name: Run Full QEMU AVD Headless Test
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 30
+          target: default
+          arch: x86_64
+          disable-animations: true
+          emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim -camera-back none
+          script: |
+            echo "=== Android Emulator Booted ==="
+            adb devices
+            echo "Installing Built APK..."
+            adb install -r build-artifacts/*.apk
+            echo "Starting MainActivity..."
+            adb shell am start -n com.localbots.app/.MainActivity
+            echo "Waiting for app to initialize..."
+            sleep 15
+            PID=$(adb shell pidof com.localbots.app || true)
+            echo "App Process PID: $PID"
+            if [ -z "$PID" ]; then
+              echo "Error: App process is not running! Checking Logcat for crash:"
+              adb logcat -d | grep -C 5 -E "AndroidRuntime|FATAL|LocalBots"
+              exit 1
+            fi
+            echo "✓ App is running healthy on QEMU Android Emulator!"
+            adb logcat -d | grep -i "LocalBots" || true
