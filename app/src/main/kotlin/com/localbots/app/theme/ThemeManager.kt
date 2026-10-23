@@ -41,15 +41,22 @@ object ThemeManager {
     val themeState: StateFlow<ThemeState> = _themeState.asStateFlow()
 
     private var sharedPreferences: SharedPreferences? = null
+    private var isInitialized = false
 
     fun initialize(context: Context) {
-        sharedPreferences = context.applicationContext.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-        val savedModeOrdinal = sharedPreferences?.getInt(KEY_THEME_MODE, ThemeMode.SCHEDULED_GOOGLE_PALETTE.ordinal)
-            ?: ThemeMode.SCHEDULED_GOOGLE_PALETTE.ordinal
-        val savedMode = ThemeMode.values().getOrElse(savedModeOrdinal) { ThemeMode.SCHEDULED_GOOGLE_PALETTE }
+        if (isInitialized) return
+        isInitialized = true
+        try {
+            sharedPreferences = context.applicationContext.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            val savedModeOrdinal = sharedPreferences?.getInt(KEY_THEME_MODE, ThemeMode.SCHEDULED_GOOGLE_PALETTE.ordinal)
+                ?: ThemeMode.SCHEDULED_GOOGLE_PALETTE.ordinal
+            val savedMode = ThemeMode.values().getOrElse(savedModeOrdinal) { ThemeMode.SCHEDULED_GOOGLE_PALETTE }
 
-        updateThemeState(savedMode)
-        startLocalTimeTicker()
+            updateThemeState(savedMode)
+            startLocalTimeTicker()
+        } catch (t: Throwable) {
+            // Safe fallback
+        }
     }
 
     fun setThemeMode(mode: ThemeMode) {

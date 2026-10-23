@@ -8,8 +8,10 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Scaffold
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
@@ -64,8 +66,14 @@ class MainActivity : ComponentActivity() {
                     val navBackStackEntry by navController.currentBackStackEntryAsState()
                     val currentRoute = navBackStackEntry?.destination?.route ?: Screen.Dashboard.route
 
-                    val settings by app.settingsRepository.settings.collectAsState()
-                    val startDestination = if (settings.isSetupCompleted) Screen.Dashboard.route else Screen.Setup.route
+                    // Stable start destination computed once on mount to prevent navigation graph crashes
+                    val startDestination = remember {
+                        if (app.settingsRepository.settings.value.isSetupCompleted) {
+                            Screen.Dashboard.route
+                        } else {
+                            Screen.Setup.route
+                        }
+                    }
 
                     val showBottomNav = currentRoute in Screen.bottomNavItems.map { it.route }
 
@@ -92,6 +100,8 @@ class MainActivity : ComponentActivity() {
                             }
                         }
                     ) { innerPadding ->
+                        var hasNavigatedAwayFromSetup by remember { mutableStateOf(false) }
+
                         NavHost(
                             navController = navController,
                             startDestination = startDestination,
@@ -101,8 +111,19 @@ class MainActivity : ComponentActivity() {
                                 SetupScreen(
                                     viewModel = setupViewModel,
                                     onSetupComplete = {
-                                        navController.navigate(Screen.Dashboard.route) {
-                                            popUpTo(Screen.Setup.route) { inclusive = true }
+                                        if (!hasNavigatedAwayFromSetup) {
+                                            hasNavigatedAwayFromSetup = true
+                                            try {
+                                                navController.navigate(Screen.Dashboard.route) {
+                                                    popUpTo(Screen.Setup.route) { inclusive = true }
+                                                    launchSingleTop = true
+                                                }
+                                            } catch (t: Throwable) {
+                                                Log.e("MainActivity", "Setup navigation error", t)
+                                                try {
+                                                    navController.navigate(Screen.Dashboard.route)
+                                                } catch (ignored: Throwable) {}
+                                            }
                                         }
                                     }
                                 )
@@ -112,7 +133,11 @@ class MainActivity : ComponentActivity() {
                                 DashboardScreen(
                                     viewModel = dashboardViewModel,
                                     onProjectSelected = {
-                                        navController.navigate(Screen.Chat.route)
+                                        try {
+                                            navController.navigate(Screen.Chat.route)
+                                        } catch (e: Exception) {
+                                            Log.e("MainActivity", "Chat navigation error", e)
+                                        }
                                     }
                                 )
                             }
@@ -121,7 +146,11 @@ class MainActivity : ComponentActivity() {
                                 ChatScreen(
                                     viewModel = chatViewModel,
                                     onNavigateToVfs = {
-                                        navController.navigate(Screen.Vfs.route)
+                                        try {
+                                            navController.navigate(Screen.Vfs.route)
+                                        } catch (e: Exception) {
+                                            Log.e("MainActivity", "VFS navigation error", e)
+                                        }
                                     }
                                 )
                             }

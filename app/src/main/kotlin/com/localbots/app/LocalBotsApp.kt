@@ -9,7 +9,6 @@ import com.localbots.app.data.vault.SecureKeyVault
 import com.localbots.app.domain.agent.ActionDispatcher
 import com.localbots.app.domain.agent.AgentOrchestrator
 import com.localbots.app.domain.agent.AntigravityCliWrapper
-import com.localbots.app.domain.nativebridge.NativeBridge
 import com.localbots.app.theme.ThemeManager
 import java.io.File
 
@@ -50,31 +49,20 @@ class LocalBotsApp : Application() {
         }
 
         try {
-            // 1. Initialize Theme Engine & Local Time Ticker
+            // Initialize Theme Engine safely
             ThemeManager.initialize(this)
         } catch (t: Throwable) {
             Log.e("LocalBotsApp", "ThemeManager init error", t)
         }
 
         try {
-            // 2. Pre-warm key repositories safely
-            settingsRepository
-            projectRepository
-            vfsRepository
-            secureKeyVault
-        } catch (t: Throwable) {
-            Log.e("LocalBotsApp", "Repositories pre-warm notice", t)
-        }
-
-        try {
-            // 3. Initialize Native Proot Environment paths
+            // Ensure filesystem directories exist
             val rootfsDir = File(filesDir, "rootfs")
             val vfsDir = File(filesDir, "vfs")
             rootfsDir.mkdirs()
             vfsDir.mkdirs()
-            NativeBridge.initEnvironment(rootfsDir.absolutePath, vfsDir.absolutePath)
         } catch (t: Throwable) {
-            Log.e("LocalBotsApp", "NativeBridge init notice", t)
+            Log.e("LocalBotsApp", "FilesDir init error", t)
         }
     }
 

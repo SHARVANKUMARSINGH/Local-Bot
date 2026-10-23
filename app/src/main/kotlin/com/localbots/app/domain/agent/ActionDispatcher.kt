@@ -28,7 +28,13 @@ class ActionDispatcher(
 ) {
 
     private val json = Json { ignoreUnknownKeys = true; isLenient = true }
-    private val clipboardManager = context.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
+    private val clipboardManager: ClipboardManager? by lazy {
+        try {
+            context.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
+        } catch (t: Throwable) {
+            null
+        }
+    }
     private var linuxClipboard = ""
 
     /**
