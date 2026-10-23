@@ -79,10 +79,9 @@ class LocalBotsApp : Application() {
     }
 
     companion object {
+        @JvmStatic
         @Volatile
         var instance: LocalBotsApp? = null
             private set
-
-        fun getInstance(): LocalBotsApp? = instance
     }
 }
