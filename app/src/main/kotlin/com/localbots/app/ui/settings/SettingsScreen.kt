@@ -50,6 +50,7 @@ import androidx.compose.material3.ExposedDropdownMenuDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Scaffold
@@ -218,8 +219,8 @@ fun SettingsScreen(
 
                         Spacer(modifier = Modifier.height(14.dp))
 
-                        // Active Google Status Badge
-                        if (state.appSettings.isLoggedInGoogle) {
+                        // Active Antigravity CLI Session Status Badge
+                        if (state.appSettings.isLoggedInGoogle || state.appSettings.isCliAuthenticated) {
                             Surface(
                                 modifier = Modifier.fillMaxWidth(),
                                 shape = RoundedCornerShape(12.dp),
@@ -238,23 +239,23 @@ fun SettingsScreen(
                                     Spacer(modifier = Modifier.width(12.dp))
                                     Column(modifier = Modifier.weight(1f)) {
                                         Text(
-                                            text = "Logged In with Google",
+                                            text = "Antigravity CLI Authenticated",
                                             style = MaterialTheme.typography.labelLarge,
                                             fontWeight = FontWeight.Bold,
                                             color = MaterialTheme.colorScheme.onPrimaryContainer
                                         )
                                         Text(
-                                            text = "${state.appSettings.googleUserEmail ?: "Google Account"}\nModel: ${state.appSettings.selectedModel}",
+                                            text = "${state.appSettings.googleUserEmail ?: "Active Developer Profile"}\nEngine: ${state.appSettings.selectedModel} (No API Key Required)",
                                             style = MaterialTheme.typography.labelSmall,
-                                            color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.8f)
+                                            color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.85f)
                                         )
                                     }
                                     IconButton(
-                                        onClick = { viewModel.signOutGoogle() }
+                                        onClick = { viewModel.logoutCli() }
                                     ) {
                                         Icon(
                                             imageVector = Icons.Rounded.Logout,
-                                            contentDescription = "Sign Out",
+                                            contentDescription = "Log Out of Antigravity CLI",
                                             tint = MaterialTheme.colorScheme.error
                                         )
                                     }
@@ -266,23 +267,24 @@ fun SettingsScreen(
                                 verticalArrangement = Arrangement.spacedBy(8.dp)
                             ) {
                                 Button(
-                                    onClick = { launchGoogleSignIn() },
+                                    onClick = { viewModel.showOttDialog() },
                                     modifier = Modifier.fillMaxWidth(),
                                     shape = RoundedCornerShape(12.dp),
                                     colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
                                 ) {
-                                    Icon(imageVector = Icons.Rounded.AccountCircle, contentDescription = null)
+                                    Icon(imageVector = Icons.Rounded.Terminal, contentDescription = null)
                                     Spacer(modifier = Modifier.width(8.dp))
-                                    Text("Sign In with Google Account", fontWeight = FontWeight.Bold)
+                                    Text("Log In to Antigravity CLI (agy auth login)", fontWeight = FontWeight.Bold)
                                 }
 
-                                TextButton(
-                                    onClick = { viewModel.showOttDialog() },
-                                    modifier = Modifier.fillMaxWidth()
+                                OutlinedButton(
+                                    onClick = { launchGoogleSignIn() },
+                                    modifier = Modifier.fillMaxWidth(),
+                                    shape = RoundedCornerShape(12.dp)
                                 ) {
-                                    Icon(imageVector = Icons.Rounded.Key, contentDescription = null, modifier = Modifier.size(16.dp))
-                                    Spacer(modifier = Modifier.width(6.dp))
-                                    Text("Or Link Google Gemini API Key", style = MaterialTheme.typography.labelMedium)
+                                    Icon(imageVector = Icons.Rounded.AccountCircle, contentDescription = null)
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Text("1-Tap Google Account Login", style = MaterialTheme.typography.labelMedium)
                                 }
                             }
                         }
@@ -352,7 +354,7 @@ fun SettingsScreen(
             }
 
             // ==========================================
-            // Section 2: 12-Connector API Key Manager
+            // Section 2: Secondary External Key Vault (Optional)
             // ==========================================
             item {
                 Row(
@@ -360,15 +362,15 @@ fun SettingsScreen(
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Column {
+                    Column(modifier = Modifier.weight(1f)) {
                         Text(
-                            text = "12-Connector API Vault",
+                            text = "External Model Keys (Optional)",
                             style = MaterialTheme.typography.titleMedium,
                             fontWeight = FontWeight.Bold,
                             color = MaterialTheme.colorScheme.onBackground
                         )
                         Text(
-                            text = "Configurable external keys with automatic failover rotation",
+                            text = "Alternative keys for OpenAI, Claude, Ollama & DeepSeek when not using Antigravity CLI",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
@@ -556,44 +558,83 @@ fun SettingsScreen(
             )
         }
 
-        // Real Google Account / Gemini Key Dialog
+        // Antigravity CLI Login Dialog (`agy auth login`)
         if (state.ottDialogVisible) {
             AlertDialog(
                 onDismissRequest = { viewModel.dismissOttDialog() },
-                title = { Text("Link Google Gemini Account") },
+                title = {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(
+                            imageVector = Icons.Rounded.Terminal,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(24.dp)
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("Antigravity CLI Login")
+                    }
+                },
                 text = {
                     Column {
                         Text(
-                            text = "Connect with your real Google account email, Google OAuth token, or official Google AI Studio Gemini API Key:",
+                            text = "Authenticate your local Antigravity CLI session (agy auth login) to unlock unlimited autonomous agent actions with Gemini 3.8 Flash without needing an API key.",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
-                        Spacer(modifier = Modifier.height(10.dp))
-                        OutlinedTextField(
-                            value = state.ottInput,
-                            onValueChange = { viewModel.onOttInputChanged(it) },
-                            label = { Text("Google Account / Gemini Key") },
-                            placeholder = { Text("AIzaSy... or your.email@gmail.com") },
-                            singleLine = true,
-                            modifier = Modifier.fillMaxWidth()
-                        )
-                        Spacer(modifier = Modifier.height(6.dp))
-                        TextButton(
+                        Spacer(modifier = Modifier.height(14.dp))
+
+                        // Fast option 1: Open Antigravity Auth in Browser
+                        Button(
                             onClick = {
                                 try {
                                     val browserIntent = Intent(
                                         Intent.ACTION_VIEW,
-                                        Uri.parse("https://aistudio.google.com/app/apikey")
+                                        Uri.parse("https://accounts.google.com/o/oauth2/v2/auth")
                                     )
                                     context.startActivity(browserIntent)
                                 } catch (ignored: Exception) {}
                             },
-                            modifier = Modifier.align(Alignment.End)
+                            modifier = Modifier.fillMaxWidth(),
+                            shape = RoundedCornerShape(10.dp)
                         ) {
-                            Icon(Icons.Rounded.OpenInNew, contentDescription = null, modifier = Modifier.size(14.dp))
-                            Spacer(modifier = Modifier.width(4.dp))
-                            Text("Get Free Key at Google AI Studio", style = MaterialTheme.typography.labelSmall)
+                            Icon(Icons.Rounded.OpenInNew, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text("Open Antigravity Login in Browser")
                         }
+
+                        Spacer(modifier = Modifier.height(8.dp))
+
+                        // Fast option 2: 1-Tap Device Account Login
+                        OutlinedButton(
+                            onClick = {
+                                launchGoogleSignIn()
+                            },
+                            modifier = Modifier.fillMaxWidth(),
+                            shape = RoundedCornerShape(10.dp)
+                        ) {
+                            Icon(Icons.Rounded.AccountCircle, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text("1-Tap Device Account Login")
+                        }
+
+                        Spacer(modifier = Modifier.height(12.dp))
+
+                        // Option 3: Manual Token / One-Time Code Entry
+                        Text(
+                            text = "Or paste Antigravity Auth Token / Code:",
+                            style = MaterialTheme.typography.labelSmall,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                        Spacer(modifier = Modifier.height(6.dp))
+                        OutlinedTextField(
+                            value = state.ottInput,
+                            onValueChange = { viewModel.onOttInputChanged(it) },
+                            label = { Text("Antigravity Auth Token / Code") },
+                            placeholder = { Text("agy_auth_... or account email") },
+                            singleLine = true,
+                            modifier = Modifier.fillMaxWidth()
+                        )
                         if (state.ottError != null) {
                             Spacer(modifier = Modifier.height(4.dp))
                             Text(
@@ -607,19 +648,14 @@ fun SettingsScreen(
                 confirmButton = {
                     Button(
                         onClick = {
-                            val input = state.ottInput.trim()
-                            if (input.startsWith("AIzaSy")) {
-                                viewModel.authenticateWithGoogleKey(input)
-                            } else {
-                                viewModel.submitOttSignIn()
-                            }
+                            viewModel.submitOttSignIn()
                         },
-                        enabled = !state.ottLoading
+                        enabled = !state.ottLoading && state.ottInput.isNotBlank()
                     ) {
                         if (state.ottLoading) {
                             CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
                         } else {
-                            Text("Verify & Connect")
+                            Text("Log In to CLI")
                         }
                     }
                 },

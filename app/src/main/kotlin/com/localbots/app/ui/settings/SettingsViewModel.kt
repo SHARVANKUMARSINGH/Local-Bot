@@ -69,59 +69,60 @@ class SettingsViewModel(
     }
 
     fun onGoogleAccountSelected(email: String) {
+        loginCliWithGoogleAccount(email)
+    }
+
+    fun loginCliWithGoogleAccount(email: String) {
         viewModelScope.launch {
             _uiState.value = _uiState.value.copy(ottLoading = true, ottError = null)
-            val result = cliWrapper.authenticateWithGoogleAccount(email)
+            val result = cliWrapper.authenticateCliWithGoogleAccount(email)
             if (result.isSuccess) {
-                cliWrapper.syncGeminiModels()
                 _uiState.value = _uiState.value.copy(
                     ottLoading = false,
                     ottDialogVisible = false,
-                    googleAuthSuccessMessage = "Connected to $email"
+                    googleAuthSuccessMessage = "Antigravity CLI Authenticated ($email)"
                 )
             } else {
                 _uiState.value = _uiState.value.copy(
                     ottLoading = false,
-                    ottError = result.exceptionOrNull()?.message ?: "Failed to connect Google account."
+                    ottError = result.exceptionOrNull()?.message ?: "Failed to authenticate Antigravity CLI."
                 )
             }
         }
     }
 
-    fun signOutGoogle() {
-        cliWrapper.signOutGoogle()
+    fun loginCliWithToken(token: String) {
+        val cleanToken = token.trim()
+        if (cleanToken.isBlank()) {
+            _uiState.value = _uiState.value.copy(ottError = "Please enter an Antigravity Auth Code or Token.")
+            return
+        }
+
+        viewModelScope.launch {
+            _uiState.value = _uiState.value.copy(ottLoading = true, ottError = null)
+            val result = cliWrapper.authenticateCliWithToken(cleanToken)
+            if (result.isSuccess) {
+                _uiState.value = _uiState.value.copy(
+                    ottLoading = false,
+                    ottDialogVisible = false,
+                    googleAuthSuccessMessage = "Antigravity CLI Session Active"
+                )
+            } else {
+                _uiState.value = _uiState.value.copy(
+                    ottLoading = false,
+                    ottError = result.exceptionOrNull()?.message ?: "Antigravity CLI login failed."
+                )
+            }
+        }
+    }
+
+    fun logoutCli() {
+        cliWrapper.logoutCli()
         _uiState.value = _uiState.value.copy(googleAuthSuccessMessage = null)
     }
 
-    fun authenticateWithGoogleKey(apiKey: String) {
-        viewModelScope.launch {
-            _uiState.value = _uiState.value.copy(ottLoading = true, ottError = null)
-            val result = cliWrapper.validateGoogleGeminiKey(apiKey)
-            if (result.isSuccess) {
-                // Also update Slot 1 in SecureKeyVault
-                val slot1 = _uiState.value.keySlots.find { it.slotNumber == 1 }
-                if (slot1 != null) {
-                    secureKeyVault.updateSlot(
-                        slot1.copy(
-                            apiKey = apiKey.trim(),
-                            isEnabled = true,
-                            isHealthy = true,
-                            lastError = null
-                        )
-                    )
-                }
-                _uiState.value = _uiState.value.copy(
-                    ottLoading = false,
-                    ottDialogVisible = false,
-                    googleAuthSuccessMessage = "Google Gemini Key Verified & Activated"
-                )
-            } else {
-                _uiState.value = _uiState.value.copy(
-                    ottLoading = false,
-                    ottError = result.exceptionOrNull()?.message ?: "Invalid Google Gemini Key."
-                )
-            }
-        }
+    fun signOutGoogle() {
+        logoutCli()
     }
 
     fun showOttDialog() {
@@ -137,25 +138,7 @@ class SettingsViewModel(
     }
 
     fun submitOttSignIn() {
-        val token = _uiState.value.ottInput.trim()
-        if (token.isBlank()) {
-            _uiState.value = _uiState.value.copy(ottError = "Please enter a valid One-Time Token.")
-            return
-        }
-
-        viewModelScope.launch {
-            _uiState.value = _uiState.value.copy(ottLoading = true, ottError = null)
-            val result = cliWrapper.authenticateWithOtt(token)
-            if (result.isSuccess) {
-                cliWrapper.syncGeminiModels()
-                _uiState.value = _uiState.value.copy(ottLoading = false, ottDialogVisible = false)
-            } else {
-                _uiState.value = _uiState.value.copy(
-                    ottLoading = false,
-                    ottError = result.exceptionOrNull()?.message ?: "Authentication failed."
-                )
-            }
-        }
+        loginCliWithToken(_uiState.value.ottInput)
     }
 
     fun selectModel(model: String) {

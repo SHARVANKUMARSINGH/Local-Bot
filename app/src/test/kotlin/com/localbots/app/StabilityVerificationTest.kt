@@ -84,6 +84,8 @@ class StabilityVerificationTest {
             cliVersion = "v1.4.2",
             isLoggedInGoogle = true,
             googleUserEmail = "developer@example.com",
+            isCliAuthenticated = true,
+            cliAuthToken = "agy_auth_session_test_token_12345",
             selectedModel = "Gemini 3.8 Flash",
             availableModels = listOf("Gemini 3.8 Flash", "Gemini 3.8 Pro"),
             lastUpdateCheck = 1700000000000L
@@ -91,6 +93,7 @@ class StabilityVerificationTest {
 
         val serialized = json.encodeToString(original)
         assertTrue("Serialized string must contain email", serialized.contains("developer@example.com"))
+        assertTrue("Serialized string must contain auth token", serialized.contains("agy_auth_session_test_token_12345"))
         val deserialized = json.decodeFromString<AppSettings>(serialized)
 
         assertEquals(original.isSetupCompleted, deserialized.isSetupCompleted)
@@ -98,6 +101,8 @@ class StabilityVerificationTest {
         assertEquals(original.cliVersion, deserialized.cliVersion)
         assertEquals(original.isLoggedInGoogle, deserialized.isLoggedInGoogle)
         assertEquals(original.googleUserEmail, deserialized.googleUserEmail)
+        assertEquals(original.isCliAuthenticated, deserialized.isCliAuthenticated)
+        assertEquals(original.cliAuthToken, deserialized.cliAuthToken)
         assertEquals(original.selectedModel, deserialized.selectedModel)
         assertEquals(original.availableModels, deserialized.availableModels)
         assertEquals(original.lastUpdateCheck, deserialized.lastUpdateCheck)

@@ -15,6 +15,8 @@ data class AppSettings(
     val cliVersion: String = "v1.4.2",
     val isLoggedInGoogle: Boolean = false,
     val googleUserEmail: String? = null,
+    val isCliAuthenticated: Boolean = false,
+    val cliAuthToken: String? = null,
     val selectedModel: String = "Gemini 3.8 Flash",
     val availableModels: List<String> = listOf(
         "Gemini 3.8 Flash",
@@ -69,10 +71,16 @@ class SettingsRepository(private val context: Context) {
     }
 
     fun setGoogleAuth(isLoggedIn: Boolean, email: String?) {
+        setCliAuth(isLoggedIn, email, null)
+    }
+
+    fun setCliAuth(authenticated: Boolean, email: String?, token: String? = null) {
         saveSettings(
             _settings.value.copy(
-                isLoggedInGoogle = isLoggedIn,
-                googleUserEmail = email
+                isLoggedInGoogle = authenticated,
+                googleUserEmail = email,
+                isCliAuthenticated = authenticated,
+                cliAuthToken = token
             )
         )
     }

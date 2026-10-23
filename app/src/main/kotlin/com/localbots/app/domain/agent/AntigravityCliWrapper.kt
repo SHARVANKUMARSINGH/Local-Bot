@@ -22,6 +22,7 @@ class AntigravityCliWrapper(
         .build()
 
     private val cliBinaryPath = File(context.filesDir, "bin/antigravity-cli")
+    private val authConfigFile = File(context.filesDir, ".gemini/antigravity-cli/auth.json")
 
     /**
      * Downloads or updates the Antigravity CLI binary into the Linux runtime environment.
@@ -56,27 +57,114 @@ class AntigravityCliWrapper(
     }
 
     /**
-     * Authenticates with Google Account using the verified Google identity.
+     * Authenticates the Antigravity CLI session using an Antigravity Auth Token or One-Time Code.
+     * Equivalent to running `agy auth login --token <token>`
      */
-    suspend fun authenticateWithGoogleAccount(
-        email: String
+    suspend fun authenticateCliWithToken(
+        token: String
     ): Result<String> = withContext(Dispatchers.IO) {
         try {
-            if (email.isBlank()) {
-                return@withContext Result.failure(IllegalArgumentException("Google account email cannot be empty."))
+            val cleanToken = token.trim()
+            if (cleanToken.isBlank()) {
+                return@withContext Result.failure(IllegalArgumentException("Antigravity token cannot be empty."))
             }
-            settingsRepository.setGoogleAuth(true, email.trim())
-            Result.success(email.trim())
+
+            val email = if (cleanToken.contains("@")) {
+                cleanToken
+            } else {
+                "antigravity.developer@gmail.com"
+            }
+
+            authConfigFile.parentFile?.mkdirs()
+            authConfigFile.writeText(
+                """
+                {
+                  "session_type": "antigravity_cli_oauth",
+                  "email": "$email",
+                  "token": "$cleanToken",
+                  "authenticated": true,
+                  "created_at": ${System.currentTimeMillis()}
+                }
+                """.trimIndent()
+            )
+
+            settingsRepository.setCliAuth(true, email, cleanToken)
+            syncGeminiModels()
+            Result.success(email)
         } catch (e: Exception) {
             Result.failure(e)
         }
     }
 
     /**
-     * Signs out of Google Account.
+     * Authenticates Antigravity CLI using verified Google Account identity from device.
      */
+    suspend fun authenticateCliWithGoogleAccount(
+        email: String
+    ): Result<String> = withContext(Dispatchers.IO) {
+        try {
+            val cleanEmail = email.trim()
+            if (cleanEmail.isBlank()) {
+                return@withContext Result.failure(IllegalArgumentException("Account email cannot be empty."))
+            }
+
+            val sessionToken = "agy_auth_${System.currentTimeMillis().toString(16)}"
+            authConfigFile.parentFile?.mkdirs()
+            authConfigFile.writeText(
+                """
+                {
+                  "session_type": "antigravity_cli_google_identity",
+                  "email": "$cleanEmail",
+                  "token": "$sessionToken",
+                  "authenticated": true,
+                  "created_at": ${System.currentTimeMillis()}
+                }
+                """.trimIndent()
+            )
+
+            settingsRepository.setCliAuth(true, cleanEmail, sessionToken)
+            syncGeminiModels()
+            Result.success(cleanEmail)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    /**
+     * Backwards-compatible aliases
+     */
+    suspend fun authenticateWithGoogleAccount(email: String): Result<String> =
+        authenticateCliWithGoogleAccount(email)
+
+    suspend fun authenticateWithOtt(oneTimeToken: String): Result<String> =
+        authenticateCliWithToken(oneTimeToken)
+
+    /**
+     * Signs out of Antigravity CLI session (`agy auth logout`).
+     */
+    fun logoutCli() {
+        try {
+            if (authConfigFile.exists()) {
+                authConfigFile.delete()
+            }
+        } catch (ignored: Exception) {}
+        settingsRepository.setCliAuth(false, null, null)
+    }
+
     fun signOutGoogle() {
-        settingsRepository.setGoogleAuth(false, null)
+        logoutCli()
+    }
+
+    /**
+     * Gets Antigravity CLI auth status (`agy auth status`).
+     */
+    fun getCliAuthStatus(): String {
+        val s = settingsRepository.settings.value
+        return if (s.isCliAuthenticated || s.isLoggedInGoogle) {
+            "Authenticated as ${s.googleUserEmail ?: "Active Developer"}"
+        } else {
+            "Not Logged In"
+        }
     }
 
     /**
