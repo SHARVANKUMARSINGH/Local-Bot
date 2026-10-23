@@ -20,7 +20,7 @@ fun BottomNavBar(
         containerColor = MaterialTheme.colorScheme.surface,
         contentColor = MaterialTheme.colorScheme.onSurface
     ) {
-        Screen.bottomNavItems.forEach { screen ->
+        Screen.getBottomNavItems().forEach { screen ->
             val selected = currentRoute == screen.route
             NavigationBarItem(
                 selected = selected,

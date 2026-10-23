@@ -75,7 +75,7 @@ class MainActivity : ComponentActivity() {
                         }
                     }
 
-                    val showBottomNav = currentRoute in Screen.bottomNavItems.map { it.route }
+                    val showBottomNav = currentRoute in Screen.bottomNavRoutes
 
                     Scaffold(
                         modifier = Modifier.fillMaxSize(),
