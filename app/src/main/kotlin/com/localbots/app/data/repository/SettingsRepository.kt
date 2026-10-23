@@ -17,14 +17,20 @@ data class AppSettings(
     val googleUserEmail: String? = null,
     val isCliAuthenticated: Boolean = false,
     val cliAuthToken: String? = null,
-    val selectedModel: String = "Gemini 3.8 Flash",
+    val selectedModel: String = "gemini-2.0-flash",
     val availableModels: List<String> = listOf(
-        "Gemini 3.8 Flash",
-        "Gemini 3.8 Pro",
-        "Gemini 3.5 Flash",
-        "Gemini 3.5 Pro",
-        "Gemini 2.5 Flash",
-        "Gemini 2.0 Flash"
+        "gemini-2.0-flash",
+        "gemini-1.5-pro",
+        "gemini-1.5-flash",
+        "gpt-4o",
+        "gpt-4o-mini",
+        "claude-3-7-sonnet",
+        "claude-3-5-sonnet",
+        "deepseek-r1",
+        "deepseek-v3",
+        "llama-3.3-70b",
+        "qwen-2.5-coder-32b",
+        "Gemini 3.8 Flash"
     ),
     val lastUpdateCheck: Long = 0L
 )
@@ -86,11 +92,19 @@ class SettingsRepository(private val context: Context) {
     }
 
     fun setSelectedModel(model: String) {
-        saveSettings(_settings.value.copy(selectedModel = model))
+        val trimmed = model.trim()
+        if (trimmed.isNotBlank()) {
+            val updated = (listOf(trimmed) + _settings.value.availableModels).distinct()
+            saveSettings(_settings.value.copy(selectedModel = trimmed, availableModels = updated))
+        }
+    }
+
+    fun setCustomModel(model: String) {
+        setSelectedModel(model)
     }
 
     fun updateAvailableModels(models: List<String>) {
-        val merged = (listOf("Gemini 3.8 Flash") + models).distinct()
+        val merged = (models + _settings.value.availableModels).distinct()
         saveSettings(_settings.value.copy(availableModels = merged))
     }
 }

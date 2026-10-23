@@ -107,4 +107,32 @@ class StabilityVerificationTest {
         assertEquals(original.availableModels, deserialized.availableModels)
         assertEquals(original.lastUpdateCheck, deserialized.lastUpdateCheck)
     }
+
+    @Test
+    fun testCustomModelSupport() {
+        val customModel = "claude-3-7-sonnet"
+        val settings = AppSettings(
+            selectedModel = customModel,
+            availableModels = listOf(customModel, "gemini-2.0-flash", "gpt-4o", "deepseek-r1")
+        )
+        val serialized = json.encodeToString(settings)
+        assertTrue(serialized.contains("claude-3-7-sonnet"))
+        val deserialized = json.decodeFromString<AppSettings>(serialized)
+        assertEquals("claude-3-7-sonnet", deserialized.selectedModel)
+        assertTrue(deserialized.availableModels.contains("claude-3-7-sonnet"))
+    }
+
+    @Test
+    fun testArbitraryModelNamesArePreserved() {
+        val arbitraryModels = listOf(
+            "meta-llama/Llama-3.3-70B-Instruct",
+            "deepseek-ai/DeepSeek-R1",
+            "anthropic/claude-3-7-sonnet-20250219",
+            "qwen/qwen-2.5-coder-32b-instruct"
+        )
+        for (m in arbitraryModels) {
+            val s = AppSettings(selectedModel = m)
+            assertEquals(m, s.selectedModel)
+        }
+    }
 }

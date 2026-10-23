@@ -94,7 +94,7 @@ class SettingsViewModel(
     fun loginCliWithToken(token: String) {
         val cleanToken = token.trim()
         if (cleanToken.isBlank()) {
-            _uiState.value = _uiState.value.copy(ottError = "Please enter an Antigravity Auth Code or Token.")
+            _uiState.value = _uiState.value.copy(ottError = "Please enter an Antigravity Auth Code or API Key.")
             return
         }
 
@@ -102,6 +102,20 @@ class SettingsViewModel(
             _uiState.value = _uiState.value.copy(ottLoading = true, ottError = null)
             val result = cliWrapper.authenticateCliWithToken(cleanToken)
             if (result.isSuccess) {
+                // If the token is a Google Gemini or API key, configure Slot 1 for failover as well
+                if (cleanToken.startsWith("AIza") || cleanToken.length > 20) {
+                    val slot1 = secureKeyVault.loadAllSlots().find { it.slotNumber == 1 }
+                    if (slot1 != null) {
+                        secureKeyVault.updateSlot(
+                            slot1.copy(
+                                apiKey = cleanToken,
+                                isEnabled = true,
+                                isHealthy = true,
+                                providerName = if (cleanToken.startsWith("AIza")) "Google Gemini" else slot1.providerName
+                            )
+                        )
+                    }
+                }
                 _uiState.value = _uiState.value.copy(
                     ottLoading = false,
                     ottDialogVisible = false,
@@ -143,6 +157,10 @@ class SettingsViewModel(
 
     fun selectModel(model: String) {
         settingsRepository.setSelectedModel(model)
+    }
+
+    fun setCustomModel(model: String) {
+        settingsRepository.setCustomModel(model)
     }
 
     fun toggleSlot(slotNumber: Int, enabled: Boolean) {

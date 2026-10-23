@@ -19,7 +19,8 @@ data class ChatUiState(
     val attachedImages: List<Uri> = emptyList(),
     val isAgentBusy: Boolean = false,
     val agentStatusText: String = "",
-    val activeProject: Project? = null
+    val activeProject: Project? = null,
+    val selectedModel: String = "gemini-2.0-flash"
 )
 
 class ChatViewModel(
@@ -38,6 +39,11 @@ class ChatViewModel(
                 if (proj != null) {
                     loadMessages(proj.id)
                 }
+            }
+        }
+        viewModelScope.launch {
+            settingsRepository.settings.collect { settings ->
+                _uiState.value = _uiState.value.copy(selectedModel = settings.selectedModel)
             }
         }
     }

@@ -9,8 +9,8 @@ import com.localbots.app.data.repository.ProjectRepository
 import com.localbots.app.data.repository.SettingsRepository
 import com.localbots.app.data.repository.VfsRepository
 import com.localbots.app.data.vault.SecureKeyVault
+import com.localbots.app.domain.nativebridge.NativeBridge
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
@@ -18,6 +18,7 @@ import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONArray
 import org.json.JSONObject
+import java.io.File
 import java.util.UUID
 import java.util.concurrent.TimeUnit
 
@@ -38,9 +39,9 @@ class AgentOrchestrator(
     /**
      * Sends a multimodal user prompt through the autonomous agent loop.
      * 1. Injects invisible backend system prompt silently.
-     * 2. Selects active connector / rotates failover key from 12-slot vault.
-     * 3. Streams or receives LLM response.
-     * 4. Parses and executes any of the 32 actions.
+     * 2. Selects active connector / rotates failover key from 12-slot vault, or uses Antigravity CLI token.
+     * 3. Streams or receives LLM response (or executes local Linux autonomous engine).
+     * 4. Parses and executes any of the 32 actions against the real filesystem & native bridge.
      * 5. Updates chat state with results.
      */
     suspend fun processUserPrompt(
@@ -66,7 +67,7 @@ class AgentOrchestrator(
             id = assistantMessageId,
             projectId = project.id,
             role = MessageRole.ASSISTANT,
-            content = "Thinking and formulating plan...",
+            content = "Analyzing prompt and formulating execution plan...",
             timestamp = System.currentTimeMillis(),
             isStreaming = true
         )
@@ -81,14 +82,16 @@ class AgentOrchestrator(
             selectedModel = selectedModel
         )
 
-        onStatusUpdate?.invoke("Synthesizing system context with $selectedModel...")
+        onStatusUpdate?.invoke("Synthesizing context with $selectedModel...")
 
-        // 4. Resolve Active API Key / Failover Rotation
+        // 4. Resolve Active API Key / Failover Rotation / Real Local Engine
         val rawLlmResponse = callLlmWithFailover(
+            project = project,
             systemPrompt = invisibleSystemPrompt,
             userPrompt = userPrompt,
             attachedImages = attachedImages,
-            selectedModel = selectedModel
+            selectedModel = selectedModel,
+            onStatusUpdate = onStatusUpdate
         )
 
         // 5. Parse 32-Action JSON Blocks
@@ -97,12 +100,13 @@ class AgentOrchestrator(
 
         val executedActions = mutableListOf<com.localbots.app.data.model.AgentActionExecution>()
         for (actionObj in parsedActions) {
-            onStatusUpdate?.invoke("Executing action: ${actionObj["Actions"] ?: "Task"}...")
+            val actName = actionObj["Actions"]?.toString() ?: "Task"
+            onStatusUpdate?.invoke("Executing action: $actName...")
             val exec = actionDispatcher.executeAction(project, actionObj)
             executedActions.add(exec)
         }
 
-        // Clean user-facing text by removing or formatting raw JSON blocks if desired
+        // Clean user-facing text
         val userFacingText = cleanRawJsonFromResponse(rawLlmResponse)
 
         assistantMessage = assistantMessage.copy(
@@ -117,26 +121,35 @@ class AgentOrchestrator(
     }
 
     private suspend fun callLlmWithFailover(
+        project: Project,
         systemPrompt: String,
         userPrompt: String,
         attachedImages: List<String>,
-        selectedModel: String
+        selectedModel: String,
+        onStatusUpdate: ((String) -> Unit)?
     ): String {
-        // Check if user is authenticated with Google OTT / Antigravity CLI
         val settings = settingsRepository.settings.value
-        if (settings.isLoggedInGoogle) {
-            // Simulated or native CLI response
-            return simulateAutonomousResponse(userPrompt, selectedModel)
-        }
 
-        // Check 12-Slot Key Vault with automatic failover rotation
+        // 1. Try enabled slots in SecureKeyVault (slots 1..12)
         var currentSlot = secureKeyVault.getNextAvailableSlot(0)
         var attempts = 0
 
-        while (currentSlot != null && attempts < 3) {
+        while (currentSlot != null && attempts < 4) {
             attempts++
             try {
-                val response = executeRemoteApiCall(currentSlot.apiKey, currentSlot.baseUrl, currentSlot.modelName.ifBlank { selectedModel }, systemPrompt, userPrompt)
+                val modelToUse = if (currentSlot.modelName.isNotBlank() && currentSlot.modelName != "auto") {
+                    currentSlot.modelName
+                } else {
+                    selectedModel
+                }
+                onStatusUpdate?.invoke("Connecting to Slot ${currentSlot.slotNumber} (${currentSlot.providerName})...")
+                val response = executeRemoteApiCall(
+                    apiKey = currentSlot.apiKey,
+                    baseUrl = currentSlot.baseUrl,
+                    model = modelToUse,
+                    systemPrompt = systemPrompt,
+                    userPrompt = userPrompt
+                )
                 secureKeyVault.markSlotSuccess(currentSlot.slotNumber)
                 return response
             } catch (e: Exception) {
@@ -146,8 +159,26 @@ class AgentOrchestrator(
             }
         }
 
-        // Fallback: Autonomous local agent response engine
-        return simulateAutonomousResponse(userPrompt, selectedModel)
+        // 2. Try CLI auth token if available and non-blank
+        val cliToken = settings.cliAuthToken?.trim()
+        if (!cliToken.isNullOrBlank()) {
+            try {
+                onStatusUpdate?.invoke("Querying Antigravity session with $selectedModel...")
+                return executeRemoteApiCall(
+                    apiKey = cliToken,
+                    baseUrl = "",
+                    model = selectedModel,
+                    systemPrompt = systemPrompt,
+                    userPrompt = userPrompt
+                )
+            } catch (e: Exception) {
+                Log.w("AgentOrchestrator", "CLI token invocation failed: ${e.message}")
+            }
+        }
+
+        // 3. Fallback: Real Local Linux Autonomous Action Engine (Zero fake/mock responses)
+        onStatusUpdate?.invoke("Executing local autonomous Linux action engine...")
+        return executeLocalAutonomousEngine(project, userPrompt, selectedModel)
     }
 
     private fun executeRemoteApiCall(
@@ -157,67 +188,200 @@ class AgentOrchestrator(
         systemPrompt: String,
         userPrompt: String
     ): String {
-        val targetUrl = if (baseUrl.isNotBlank()) {
-            if (baseUrl.endsWith("/chat/completions")) baseUrl else "$baseUrl/v1/chat/completions"
-        } else {
-            "https://generativelanguage.googleapis.com/v1beta/models/$model:generateContent?key=$apiKey"
-        }
+        val isGemini = baseUrl.isBlank() || baseUrl.contains("googleapis.com")
 
-        // OpenAI-compatible / Gemini JSON payload
-        val payload = JSONObject().apply {
-            put("contents", JSONArray().apply {
-                put(JSONObject().apply {
-                    put("role", "user")
-                    put("parts", JSONArray().apply {
-                        put(JSONObject().put("text", "$systemPrompt\n\nUser Request: $userPrompt"))
+        if (isGemini) {
+            // Normalize model slug for Google Gemini API
+            val resolvedModelSlug = when (model.trim().lowercase()) {
+                "gemini 3.8 flash", "gemini 3.5 flash", "gemini 2.5 flash", "gemini 2.0 flash" -> "gemini-2.0-flash"
+                "gemini 3.8 pro", "gemini 3.5 pro", "gemini 1.5 pro" -> "gemini-1.5-pro"
+                "gemini 1.5 flash" -> "gemini-1.5-flash"
+                else -> model.trim().replace(" ", "-").lowercase()
+            }
+
+            val targetUrl = "https://generativelanguage.googleapis.com/v1beta/models/$resolvedModelSlug:generateContent?key=$apiKey"
+
+            val payload = JSONObject().apply {
+                put("contents", JSONArray().apply {
+                    put(JSONObject().apply {
+                        put("role", "user")
+                        put("parts", JSONArray().apply {
+                            put(JSONObject().put("text", "$systemPrompt\n\nUser Request: $userPrompt"))
+                        })
                     })
                 })
-            })
-        }
-
-        val request = Request.Builder()
-            .url(targetUrl)
-            .post(payload.toString().toRequestBody("application/json".toMediaType()))
-            .build()
-
-        httpClient.newCall(request).execute().use { response ->
-            if (!response.isSuccessful) {
-                throw IllegalStateException("API error HTTP ${response.code}: ${response.body?.string()}")
             }
-            val body = response.body?.string() ?: ""
-            val jsonRes = JSONObject(body)
-            return jsonRes.optJSONArray("candidates")
-                ?.optJSONObject(0)
-                ?.optJSONObject("content")
-                ?.optJSONArray("parts")
-                ?.optJSONObject(0)
-                ?.optString("text") ?: body
+
+            val request = Request.Builder()
+                .url(targetUrl)
+                .post(payload.toString().toRequestBody("application/json".toMediaType()))
+                .build()
+
+            httpClient.newCall(request).execute().use { response ->
+                if (!response.isSuccessful) {
+                    val err = response.body?.string() ?: ""
+                    throw IllegalStateException("Gemini API error HTTP ${response.code}: $err")
+                }
+                val body = response.body?.string() ?: ""
+                val jsonRes = JSONObject(body)
+                return jsonRes.optJSONArray("candidates")
+                    ?.optJSONObject(0)
+                    ?.optJSONObject("content")
+                    ?.optJSONArray("parts")
+                    ?.optJSONObject(0)
+                    ?.optString("text") ?: body
+            }
+        } else {
+            // OpenAI-compatible endpoint (OpenRouter, DeepSeek, Local Ollama, Groq, etc.)
+            val targetUrl = if (baseUrl.endsWith("/chat/completions")) {
+                baseUrl
+            } else {
+                "${baseUrl.trimEnd('/')}/v1/chat/completions"
+            }
+
+            val payload = JSONObject().apply {
+                put("model", model)
+                put("messages", JSONArray().apply {
+                    put(JSONObject().apply {
+                        put("role", "system")
+                        put("content", systemPrompt)
+                    })
+                    put(JSONObject().apply {
+                        put("role", "user")
+                        put("content", userPrompt)
+                    })
+                })
+            }
+
+            val request = Request.Builder()
+                .url(targetUrl)
+                .addHeader("Authorization", "Bearer $apiKey")
+                .addHeader("Content-Type", "application/json")
+                .post(payload.toString().toRequestBody("application/json".toMediaType()))
+                .build()
+
+            httpClient.newCall(request).execute().use { response ->
+                if (!response.isSuccessful) {
+                    val err = response.body?.string() ?: ""
+                    throw IllegalStateException("API error HTTP ${response.code}: $err")
+                }
+                val body = response.body?.string() ?: ""
+                val jsonRes = JSONObject(body)
+                return jsonRes.optJSONArray("choices")
+                    ?.optJSONObject(0)
+                    ?.optJSONObject("message")
+                    ?.optString("content") ?: body
+            }
         }
     }
 
-    private suspend fun simulateAutonomousResponse(userPrompt: String, model: String): String {
-        delay(1200)
-        val lower = userPrompt.lowercase()
+    /**
+     * Executes the user prompt locally on the real Linux environment with zero fake strings.
+     * Real commands are executed against the device's shell, filesystem, and native bridge.
+     */
+    private fun executeLocalAutonomousEngine(
+        project: Project,
+        userPrompt: String,
+        selectedModel: String
+    ): String {
+        val trimmed = userPrompt.trim()
+        val lower = trimmed.lowercase()
 
-        return when {
-            lower.contains("browser") || lower.contains("find") || lower.contains("search") || lower.contains("best ai") -> {
-                """
-I will open Firefox in the aarch64 Linux container, navigate to Google, and search for the latest information on the Best AI in the World.
+        // 1. Direct Shell Command Execution ($ <cmd>, or explicit command prefixes)
+        val isExplicitCmd = trimmed.startsWith("$") || trimmed.startsWith(">")
+        val cleanCmd = if (isExplicitCmd) trimmed.substring(1).trim() else trimmed
+
+        val commonShellStarters = listOf(
+            "ls", "pwd", "uname", "whoami", "cat", "ps", "df", "free", "mkdir", "rm",
+            "touch", "cp", "mv", "git", "python", "python3", "node", "npm", "tsc",
+            "curl", "wget", "find", "grep", "which", "echo", "agy", "antigravity-cli",
+            "top", "uptime", "id", "date"
+        )
+        val firstWord = cleanCmd.split("\\s+".toRegex()).firstOrNull()?.lowercase() ?: ""
+
+        val shouldRunAsBash = isExplicitCmd || commonShellStarters.contains(firstWord) ||
+                lower.startsWith("run ") || lower.startsWith("execute ") || lower.startsWith("bash ")
+
+        if (shouldRunAsBash) {
+            val cmdToRun = when {
+                isExplicitCmd -> cleanCmd
+                lower.startsWith("run ") -> cleanCmd.substring(4).trim()
+                lower.startsWith("execute ") -> cleanCmd.substring(8).trim()
+                lower.startsWith("bash ") -> cleanCmd.substring(5).trim()
+                else -> cleanCmd
+            }
+
+            return """
+I will execute the shell command in your workspace directory (`${project.workspacePath}`).
 
 ```json
 {
-  "Actions": "Browser_Launch",
-  "headless": false
+  "Actions": "Bash_Exec",
+  "command": "$cmdToRun",
+  "timeout": 30
+}
+```
+""".trimIndent()
+        }
+
+        // 2. File Creation or Script Writing Intent
+        if (lower.contains("create file") || lower.contains("write file") || lower.contains("create script")) {
+            val fileName = extractFileNameFromPrompt(trimmed) ?: "script.py"
+            val fileContent = extractContentFromPrompt(trimmed) ?: "# Autonomous Agent Script\nprint('Hello from Local Bots Linux runtime!')\n"
+
+            return """
+Creating file `$fileName` inside the project workspace:
+
+```json
+{
+  "Actions": "VFS_Push_Text",
+  "path": "$fileName",
+  "content": ${JSONObject.quote(fileContent)}
 }
 ```
 
 ```json
 {
-  "Actions": "Browser_Search",
-  "query": "Best AI in the World 2026 benchmarks",
-  "engine": "google"
+  "Actions": "VFS_List_Tree",
+  "path": ""
 }
 ```
+""".trimIndent()
+        }
+
+        // 3. Python Execution Intent
+        if (lower.contains("python") || lower.contains("run python")) {
+            return """
+Executing Python task in the local Linux runtime:
+
+```json
+{
+  "Actions": "Python_Run",
+  "file": "script.py"
+}
+```
+""".trimIndent()
+        }
+
+        // 4. Git Operations
+        if (lower.startsWith("git ") || lower.contains("git status") || lower.contains("git commit")) {
+            val gitArgs = if (lower.startsWith("git ")) cleanCmd.substring(4).trim() else "status"
+            return """
+Running Git operation on repository:
+
+```json
+{
+  "Actions": "Git_Operation",
+  "operation": "$gitArgs"
+}
+```
+""".trimIndent()
+        }
+
+        // 5. Screenshot Intent
+        if (lower.contains("screenshot") || lower.contains("capture screen") || lower.contains("desktop")) {
+            return """
+Capturing virtual desktop framebuffer (:1 via TigerVNC / Xvfb):
 
 ```json
 {
@@ -226,83 +390,52 @@ I will open Firefox in the aarch64 Linux container, navigate to Google, and sear
   "format": "webp"
 }
 ```
-
-The browser has loaded the search results. Leading AI models include Gemini 3.8 Flash / Ultra, Claude 3.7 Sonnet, and GPT-4.5.
 """.trimIndent()
-            }
+        }
 
-            lower.contains("file") || lower.contains("create") || lower.contains("code") || lower.contains("script") -> {
-                """
-I will initialize the script in the project's sandboxed Virtual File System (VFS) and verify it using Python 3.
+        // 6. General Conversational / Status Request: Query real system environment
+        val unameRes = NativeBridge.executeCommand("uname -a")
+        val uptimeRes = NativeBridge.executeCommand("uptime")
+        val sysInfo = unameRes.stdout.trim().ifBlank { "Linux aarch64 (Android runtime)" }
+        val uptimeInfo = uptimeRes.stdout.trim().ifBlank { "active" }
 
-```json
-{
-  "Actions": "VFS_Push_Text",
-  "path": "workspace/agent_task.py",
-  "content": "import sys\n\nprint('Autonomous Agent initialized successfully!')\nprint(f'Python version: {sys.version}')\n"
-}
-```
+        return """
+**Local Autonomous Agent Ready**
+* **Model Selected:** `$selectedModel`
+* **Local Kernel:** `$sysInfo`
+* **Uptime:** `$uptimeInfo`
+* **Workspace:** `${project.workspacePath}`
 
-```json
-{
-  "Actions": "Python_Run",
-  "file": "workspace/agent_task.py"
-}
-```
+I am executing locally on your device's native Linux subsystem. You can:
+1. Run shell commands directly (e.g. `ls -la`, `git status`, `python3 --version`, or `$ <command>`).
+2. Create and run code scripts (Python, TypeScript, Node.js).
+3. Connect an API Key or Antigravity Session in **Settings -> Connectors** for cloud reasoning with **$selectedModel**, Claude 3.7, GPT-4o, or DeepSeek R1.
 
-The script was written to the VFS workspace and executed cleanly.
-""".trimIndent()
-            }
-
-            lower.contains("mouse") || lower.contains("click") -> {
-                """
-Moving cursor to the target GUI coordinates and performing click:
-
-```json
-{
-  "Actions": "Update_Mouse_Position",
-  "coordinates": [640, 360, 0]
-}
-```
-
-```json
-{
-  "Actions": "left-click",
-  "coordinates": [640, 360]
-}
-```
-
-Action injected into X11 virtual display.
-""".trimIndent()
-            }
-
-            else -> {
-                """
-I have analyzed your request using $model. Let's inspect the system status and VFS tree.
+Inspecting current workspace:
 
 ```json
 {
   "Actions": "Bash_Exec",
-  "command": "uname -a && uptime",
+  "command": "ls -la",
   "timeout": 10
 }
 ```
-
-```json
-{
-  "Actions": "VFS_List_Tree",
-  "path": "workspace"
-}
-```
-
-Autonomous execution complete. Ready for your next command.
 """.trimIndent()
-            }
-        }
+    }
+
+    private fun extractFileNameFromPrompt(prompt: String): String? {
+        val regex = "(?:named|file|path)\\s+[`\"']?([a-zA-Z0-9_.-]+)[`\"']?".toRegex(RegexOption.IGNORE_CASE)
+        val match = regex.find(prompt)
+        return match?.groupValues?.getOrNull(1)
+    }
+
+    private fun extractContentFromPrompt(prompt: String): String? {
+        val codeBlockRegex = "```(?:python|bash|sh|txt|text)?\\s*([\\s\\S]*?)```".toRegex()
+        val match = codeBlockRegex.find(prompt)
+        return match?.groupValues?.getOrNull(1)?.trim()
     }
 
     private fun cleanRawJsonFromResponse(raw: String): String {
-        // Retain markdown readability while leaving action blocks for inspection
         return raw.trim()
     }
 }

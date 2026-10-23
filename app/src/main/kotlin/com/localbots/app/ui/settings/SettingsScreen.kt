@@ -245,7 +245,7 @@ fun SettingsScreen(
                                             color = MaterialTheme.colorScheme.onPrimaryContainer
                                         )
                                         Text(
-                                            text = "${state.appSettings.googleUserEmail ?: "Active Developer Profile"}\nEngine: ${state.appSettings.selectedModel} (No API Key Required)",
+                                            text = "${state.appSettings.googleUserEmail ?: "Active Developer Profile"}\nModel Engine: ${state.appSettings.selectedModel}",
                                             style = MaterialTheme.typography.labelSmall,
                                             color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.85f)
                                         )
@@ -291,9 +291,9 @@ fun SettingsScreen(
 
                         Spacer(modifier = Modifier.height(14.dp))
 
-                        // Model Selector Dropdown
+                        // Model Selector Dropdown & Custom Model Input
                         Text(
-                            text = "Active Gemini Model Tier",
+                            text = "Active LLM Model & Engine",
                             style = MaterialTheme.typography.labelMedium,
                             fontWeight = FontWeight.Bold,
                             color = MaterialTheme.colorScheme.onSurface
@@ -325,14 +325,14 @@ fun SettingsScreen(
                                         text = {
                                             Row(verticalAlignment = Alignment.CenterVertically) {
                                                 Text(modelName)
-                                                if (modelName == "Gemini 3.8 Flash") {
+                                                if (modelName.contains("flash", ignoreCase = true) || modelName == "gemini-2.0-flash") {
                                                     Spacer(modifier = Modifier.width(6.dp))
                                                     Surface(
                                                         color = MaterialTheme.colorScheme.primary,
                                                         shape = RoundedCornerShape(4.dp)
                                                     ) {
                                                         Text(
-                                                            text = "RECOMMENDED",
+                                                            text = "FAST",
                                                             fontSize = 9.sp,
                                                             color = MaterialTheme.colorScheme.onPrimary,
                                                             modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp)
@@ -347,6 +347,37 @@ fun SettingsScreen(
                                         }
                                     )
                                 }
+                            }
+                        }
+
+                        Spacer(modifier = Modifier.height(8.dp))
+
+                        // Custom Model Input: Type any custom model name (e.g. gpt-4o, claude-3-7-sonnet, deepseek-r1)
+                        var customModelInput by remember { mutableStateOf("") }
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            OutlinedTextField(
+                                value = customModelInput,
+                                onValueChange = { customModelInput = it },
+                                placeholder = { Text("Or type any model (e.g. gpt-4o, deepseek-r1)", fontSize = 12.sp) },
+                                singleLine = true,
+                                modifier = Modifier.weight(1f),
+                                shape = RoundedCornerShape(10.dp)
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Button(
+                                onClick = {
+                                    if (customModelInput.isNotBlank()) {
+                                        viewModel.setCustomModel(customModelInput.trim())
+                                        customModelInput = ""
+                                    }
+                                },
+                                shape = RoundedCornerShape(10.dp),
+                                enabled = customModelInput.isNotBlank()
+                            ) {
+                                Text("Set")
                             }
                         }
                     }
@@ -577,19 +608,40 @@ fun SettingsScreen(
                 text = {
                     Column {
                         Text(
-                            text = "Authenticate your local Antigravity CLI session (agy auth login) to unlock unlimited autonomous agent actions with Gemini 3.8 Flash without needing an API key.",
+                            text = "Authenticate your local Antigravity CLI session (agy auth login) or link a Google Gemini API Key for autonomous agent execution.",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                         Spacer(modifier = Modifier.height(14.dp))
 
-                        // Fast option 1: Open Antigravity Auth in Browser
+                        // Fast option 1: Open Google AI Studio in Browser (Direct free API Key generation)
                         Button(
                             onClick = {
                                 try {
                                     val browserIntent = Intent(
                                         Intent.ACTION_VIEW,
-                                        Uri.parse("https://accounts.google.com/o/oauth2/v2/auth")
+                                        Uri.parse("https://aistudio.google.com/app/apikey")
+                                    )
+                                    context.startActivity(browserIntent)
+                                } catch (ignored: Exception) {}
+                            },
+                            modifier = Modifier.fillMaxWidth(),
+                            shape = RoundedCornerShape(10.dp)
+                        ) {
+                            Icon(Icons.Rounded.Key, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text("Get Free Gemini Key (Google AI Studio)")
+                        }
+
+                        Spacer(modifier = Modifier.height(8.dp))
+
+                        // Fast option 2: Open Google Account Sign-In in Browser
+                        OutlinedButton(
+                            onClick = {
+                                try {
+                                    val browserIntent = Intent(
+                                        Intent.ACTION_VIEW,
+                                        Uri.parse("https://accounts.google.com/signin")
                                     )
                                     context.startActivity(browserIntent)
                                 } catch (ignored: Exception) {}
@@ -599,12 +651,12 @@ fun SettingsScreen(
                         ) {
                             Icon(Icons.Rounded.OpenInNew, contentDescription = null, modifier = Modifier.size(16.dp))
                             Spacer(modifier = Modifier.width(8.dp))
-                            Text("Open Antigravity Login in Browser")
+                            Text("Open Google Account Sign-In")
                         }
 
                         Spacer(modifier = Modifier.height(8.dp))
 
-                        // Fast option 2: 1-Tap Device Account Login
+                        // Fast option 3: 1-Tap Device Account Login
                         OutlinedButton(
                             onClick = {
                                 launchGoogleSignIn()
@@ -619,9 +671,9 @@ fun SettingsScreen(
 
                         Spacer(modifier = Modifier.height(12.dp))
 
-                        // Option 3: Manual Token / One-Time Code Entry
+                        // Option 4: Manual API Key / Token / One-Time Code Entry
                         Text(
-                            text = "Or paste Antigravity Auth Token / Code:",
+                            text = "Or paste Gemini API Key / Antigravity Token:",
                             style = MaterialTheme.typography.labelSmall,
                             fontWeight = FontWeight.Bold,
                             color = MaterialTheme.colorScheme.onSurface
@@ -630,8 +682,8 @@ fun SettingsScreen(
                         OutlinedTextField(
                             value = state.ottInput,
                             onValueChange = { viewModel.onOttInputChanged(it) },
-                            label = { Text("Antigravity Auth Token / Code") },
-                            placeholder = { Text("agy_auth_... or account email") },
+                            label = { Text("Gemini API Key or Antigravity Token") },
+                            placeholder = { Text("AIzaSy... or agy_auth_... or email") },
                             singleLine = true,
                             modifier = Modifier.fillMaxWidth()
                         )

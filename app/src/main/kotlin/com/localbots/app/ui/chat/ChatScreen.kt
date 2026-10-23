@@ -116,7 +116,7 @@ fun ChatScreen(
                                 maxLines = 1
                             )
                             Text(
-                                text = "Gemini 3.8 Flash • Sandboxed VFS",
+                                text = "${state.selectedModel.ifBlank { "Autonomous Agent" }} • Sandboxed VFS",
                                 style = MaterialTheme.typography.labelSmall,
                                 color = MaterialTheme.colorScheme.primary
                             )
@@ -466,7 +466,7 @@ fun EmptyChatSuggestions(
 
         // Suggested prompts
         val suggestions = listOf(
-            "Hi, can you search for the latest updates on Gemini 3.8 Flash?",
+            "Inspect system status and run uname -a",
             "Create a Python script in workspace and test run it",
             "Take a screenshot of the virtual X11 desktop",
             "Initialize a new Git repository and commit workspace"
