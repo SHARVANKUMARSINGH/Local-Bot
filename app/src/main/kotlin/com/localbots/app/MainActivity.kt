@@ -1,6 +1,7 @@
 package com.localbots.app
 
 import android.os.Bundle
+import android.util.Log
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.layout.fillMaxSize
@@ -30,94 +31,118 @@ import com.localbots.app.ui.vfs.VfsViewModel
 
 class MainActivity : ComponentActivity() {
 
+    private val app: LocalBotsApp
+        get() = application as LocalBotsApp
+
+    private val setupViewModel: SetupViewModel by lazy {
+        SetupViewModel(applicationContext, app.settingsRepository)
+    }
+
+    private val dashboardViewModel: DashboardViewModel by lazy {
+        DashboardViewModel(app.projectRepository)
+    }
+
+    private val chatViewModel: ChatViewModel by lazy {
+        ChatViewModel(app.projectRepository, app.settingsRepository, app.agentOrchestrator)
+    }
+
+    private val vfsViewModel: VfsViewModel by lazy {
+        VfsViewModel(app.projectRepository, app.vfsRepository)
+    }
+
+    private val settingsViewModel: SettingsViewModel by lazy {
+        SettingsViewModel(app.settingsRepository, app.secureKeyVault, app.cliWrapper)
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        val app = application as LocalBotsApp
-        val setupViewModel = SetupViewModel(applicationContext, app.settingsRepository)
-        val dashboardViewModel = DashboardViewModel(app.projectRepository)
-        val chatViewModel = ChatViewModel(app.projectRepository, app.settingsRepository, app.agentOrchestrator)
-        val vfsViewModel = VfsViewModel(app.projectRepository, app.vfsRepository)
-        val settingsViewModel = SettingsViewModel(app.settingsRepository, app.secureKeyVault, app.cliWrapper)
+        try {
+            setContent {
+                LocalBotsTheme {
+                    val navController = rememberNavController()
+                    val navBackStackEntry by navController.currentBackStackEntryAsState()
+                    val currentRoute = navBackStackEntry?.destination?.route ?: Screen.Dashboard.route
 
-        setContent {
-            LocalBotsTheme {
-                val navController = rememberNavController()
-                val navBackStackEntry by navController.currentBackStackEntryAsState()
-                val currentRoute = navBackStackEntry?.destination?.route ?: Screen.Dashboard.route
+                    val settings by app.settingsRepository.settings.collectAsState()
+                    val startDestination = if (settings.isSetupCompleted) Screen.Dashboard.route else Screen.Setup.route
 
-                val settings by app.settingsRepository.settings.collectAsState()
-                val startDestination = if (settings.isSetupCompleted) Screen.Dashboard.route else Screen.Setup.route
+                    val showBottomNav = currentRoute in Screen.bottomNavItems.map { it.route }
 
-                val showBottomNav = currentRoute in Screen.bottomNavItems.map { it.route }
-
-                Scaffold(
-                    modifier = Modifier.fillMaxSize(),
-                    bottomBar = {
-                        if (showBottomNav) {
-                            BottomNavBar(
-                                currentRoute = currentRoute,
-                                onNavigate = { targetRoute ->
-                                    navController.navigate(targetRoute) {
-                                        popUpTo(Screen.Dashboard.route) {
-                                            saveState = true
+                    Scaffold(
+                        modifier = Modifier.fillMaxSize(),
+                        bottomBar = {
+                            if (showBottomNav) {
+                                BottomNavBar(
+                                    currentRoute = currentRoute,
+                                    onNavigate = { targetRoute ->
+                                        try {
+                                            navController.navigate(targetRoute) {
+                                                popUpTo(Screen.Dashboard.route) {
+                                                    saveState = true
+                                                }
+                                                launchSingleTop = true
+                                                restoreState = true
+                                            }
+                                        } catch (e: Exception) {
+                                            Log.e("MainActivity", "Navigation failure to $targetRoute", e)
                                         }
-                                        launchSingleTop = true
-                                        restoreState = true
                                     }
-                                }
-                            )
+                                )
+                            }
                         }
-                    }
-                ) { innerPadding ->
-                    NavHost(
-                        navController = navController,
-                        startDestination = startDestination,
-                        modifier = Modifier.padding(innerPadding)
-                    ) {
-                        composable(Screen.Setup.route) {
-                            SetupScreen(
-                                viewModel = setupViewModel,
-                                onSetupComplete = {
-                                    navController.navigate(Screen.Dashboard.route) {
-                                        popUpTo(Screen.Setup.route) { inclusive = true }
+                    ) { innerPadding ->
+                        NavHost(
+                            navController = navController,
+                            startDestination = startDestination,
+                            modifier = Modifier.padding(innerPadding)
+                        ) {
+                            composable(Screen.Setup.route) {
+                                SetupScreen(
+                                    viewModel = setupViewModel,
+                                    onSetupComplete = {
+                                        navController.navigate(Screen.Dashboard.route) {
+                                            popUpTo(Screen.Setup.route) { inclusive = true }
+                                        }
                                     }
-                                }
-                            )
-                        }
+                                )
+                            }
 
-                        composable(Screen.Dashboard.route) {
-                            DashboardScreen(
-                                viewModel = dashboardViewModel,
-                                onProjectSelected = {
-                                    navController.navigate(Screen.Chat.route)
-                                }
-                            )
-                        }
+                            composable(Screen.Dashboard.route) {
+                                DashboardScreen(
+                                    viewModel = dashboardViewModel,
+                                    onProjectSelected = {
+                                        navController.navigate(Screen.Chat.route)
+                                    }
+                                )
+                            }
 
-                        composable(Screen.Chat.route) {
-                            ChatScreen(
-                                viewModel = chatViewModel,
-                                onNavigateToVfs = {
-                                    navController.navigate(Screen.Vfs.route)
-                                }
-                            )
-                        }
+                            composable(Screen.Chat.route) {
+                                ChatScreen(
+                                    viewModel = chatViewModel,
+                                    onNavigateToVfs = {
+                                        navController.navigate(Screen.Vfs.route)
+                                    }
+                                )
+                            }
 
-                        composable(Screen.Vfs.route) {
-                            VfsExplorerScreen(
-                                viewModel = vfsViewModel
-                            )
-                        }
+                            composable(Screen.Vfs.route) {
+                                VfsExplorerScreen(
+                                    viewModel = vfsViewModel
+                                )
+                            }
 
-                        composable(Screen.Settings.route) {
-                            SettingsScreen(
-                                viewModel = settingsViewModel
-                            )
+                            composable(Screen.Settings.route) {
+                                SettingsScreen(
+                                    viewModel = settingsViewModel
+                                )
+                            }
                         }
                     }
                 }
             }
+        } catch (t: Throwable) {
+            Log.e("MainActivity", "Fatal error during setContent", t)
         }
     }
 }

@@ -2,6 +2,7 @@ package com.localbots.app.data.vault
 
 import android.content.Context
 import android.content.SharedPreferences
+import android.util.Log
 import androidx.security.crypto.EncryptedSharedPreferences
 import androidx.security.crypto.MasterKey
 import com.localbots.app.data.model.ApiKeyConfig
@@ -15,30 +16,47 @@ import kotlinx.serialization.json.Json
 class SecureKeyVault(private val context: Context) {
 
     private val json = Json { ignoreUnknownKeys = true; encodeDefaults = true }
-    private val prefs: SharedPreferences by lazy {
-        try {
+    private var prefs: SharedPreferences = initializePreferences()
+
+    private fun initializePreferences(): SharedPreferences {
+        return try {
             val masterKey = MasterKey.Builder(context)
                 .setKeyScheme(MasterKey.KeyScheme.AES256_GCM)
                 .build()
 
             EncryptedSharedPreferences.create(
                 context,
-                "localbots_secure_vault",
+                PREFS_NAME,
                 masterKey,
                 EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
                 EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM
             )
         } catch (t: Throwable) {
-            // Fallback for sandboxed emulators or custom ROMs where KeyStore might be restricted
-            context.getSharedPreferences("localbots_vault_fallback", Context.MODE_PRIVATE)
+            Log.w(TAG, "EncryptedSharedPreferences unavailable, falling back to standard prefs: ${t.message}")
+            try {
+                context.deleteSharedPreferences(PREFS_NAME)
+            } catch (ignored: Throwable) {}
+            context.getSharedPreferences(FALLBACK_NAME, Context.MODE_PRIVATE)
         }
+    }
+
+    private fun switchToFallback(): SharedPreferences {
+        Log.w(TAG, "Switching to standard fallback preferences after crypto error")
+        val fallback = context.getSharedPreferences(FALLBACK_NAME, Context.MODE_PRIVATE)
+        prefs = fallback
+        return fallback
     }
 
     private val _slotsState = MutableStateFlow<List<ApiKeyConfig>>(emptyList())
     val slotsState: StateFlow<List<ApiKeyConfig>> = _slotsState.asStateFlow()
 
     init {
-        loadAllSlots()
+        try {
+            loadAllSlots()
+        } catch (t: Throwable) {
+            Log.e(TAG, "Init loadAllSlots encountered error", t)
+            _slotsState.value = DefaultConnectors.defaultSlots
+        }
     }
 
     fun loadAllSlots(): List<ApiKeyConfig> {
@@ -46,12 +64,22 @@ class SecureKeyVault(private val context: Context) {
         val defaults = DefaultConnectors.defaultSlots
 
         for (i in 1..12) {
-            val jsonStr = prefs.getString("slot_$i", null)
+            var jsonStr: String? = null
+            try {
+                jsonStr = prefs.getString("slot_$i", null)
+            } catch (secEx: Throwable) {
+                Log.w(TAG, "Crypto failure reading slot_$i, reverting to fallback: ${secEx.message}")
+                switchToFallback()
+                try {
+                    jsonStr = prefs.getString("slot_$i", null)
+                } catch (ignored: Throwable) {}
+            }
+
             if (jsonStr != null) {
                 try {
                     val config = json.decodeFromString<ApiKeyConfig>(jsonStr)
                     list.add(config)
-                } catch (e: Exception) {
+                } catch (e: Throwable) {
                     val defaultItem = defaults.find { it.slotNumber == i } ?: ApiKeyConfig(i, "Slot $i")
                     list.add(defaultItem)
                 }
@@ -65,8 +93,17 @@ class SecureKeyVault(private val context: Context) {
     }
 
     fun updateSlot(slot: ApiKeyConfig) {
-        val serialized = json.encodeToString(slot)
-        prefs.edit().putString("slot_${slot.slotNumber}", serialized).apply()
+        try {
+            val serialized = json.encodeToString(slot)
+            prefs.edit().putString("slot_${slot.slotNumber}", serialized).apply()
+        } catch (t: Throwable) {
+            Log.e(TAG, "Error writing slot ${slot.slotNumber}, using fallback", t)
+            try {
+                switchToFallback()
+                val serialized = json.encodeToString(slot)
+                prefs.edit().putString("slot_${slot.slotNumber}", serialized).apply()
+            } catch (ignored: Throwable) {}
+        }
         loadAllSlots()
     }
 
@@ -84,7 +121,6 @@ class SecureKeyVault(private val context: Context) {
         val enabledAndHealthy = slots.filter { it.isEnabled && it.isHealthy && it.apiKey.isNotBlank() }
         if (enabledAndHealthy.isEmpty()) return null
 
-        // Try after the current slot
         val next = enabledAndHealthy.firstOrNull { it.slotNumber > afterSlotNumber }
         return next ?: enabledAndHealthy.first()
     }
@@ -107,5 +143,11 @@ class SecureKeyVault(private val context: Context) {
             lastError = null
         )
         updateSlot(updated)
+    }
+
+    companion object {
+        private const val TAG = "SecureKeyVault"
+        private const val PREFS_NAME = "localbots_secure_vault"
+        private const val FALLBACK_NAME = "localbots_vault_fallback"
     }
 }

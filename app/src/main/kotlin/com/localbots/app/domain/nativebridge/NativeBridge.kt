@@ -13,8 +13,8 @@ object NativeBridge {
             System.loadLibrary("native-lib")
             isNativeLoaded = true
             Log.i(TAG, "Successfully loaded native-lib.so")
-        } catch (e: UnsatisfiedLinkError) {
-            Log.w(TAG, "Native library 'native-lib' not loaded, using Java/Linux fallback bridge: ${e.message}")
+        } catch (t: Throwable) {
+            Log.w(TAG, "Native library 'native-lib' not loaded, using Java/Linux fallback bridge: ${t.message}")
             isNativeLoaded = false
         }
     }
@@ -37,7 +37,7 @@ object NativeBridge {
         return if (isNativeLoaded) {
             try {
                 nativeInitEnvironment(rootfsPath, vfsMountPath)
-            } catch (e: Exception) {
+            } catch (e: Throwable) {
                 Log.e(TAG, "nativeInitEnvironment error", e)
                 false
             }
@@ -47,16 +47,7 @@ object NativeBridge {
     }
 
     fun executeCommand(command: String, timeoutSec: Int = 60, workingDir: File? = null): NativeCommandResult {
-        if (isNativeLoaded) {
-            try {
-                val res = nativeExecuteCommand(command, timeoutSec)
-                if (res != null) return res
-            } catch (e: Exception) {
-                Log.w(TAG, "nativeExecuteCommand failed, falling back to LegacyProcessBridge", e)
-            }
-        }
-
-        // Java Legacy Fallback
+        // Java Legacy Bridge provides real, safe process execution under modern Android seccomp policies
         val res = LegacyProcessBridge.executeShell(command, workingDir, null, timeoutSec.toLong())
         return NativeCommandResult(
             exitCode = res.exitCode,
@@ -70,7 +61,7 @@ object NativeBridge {
         return if (isNativeLoaded) {
             try {
                 nativeCaptureFramebuffer(displayNum, format)
-            } catch (e: Exception) {
+            } catch (e: Throwable) {
                 null
             }
         } else {
@@ -80,62 +71,64 @@ object NativeBridge {
 
     fun injectMouseMove(x: Int, y: Int, z: Int = 0): Boolean {
         return if (isNativeLoaded) {
-            try { nativeInjectMouseMove(x, y, z) } catch (e: Exception) { false }
+            try { nativeInjectMouseMove(x, y, z) } catch (e: Throwable) { false }
         } else true
     }
 
     fun injectMouseClick(button: Int, x: Int = -1, y: Int = -1): Boolean {
         return if (isNativeLoaded) {
-            try { nativeInjectMouseClick(button, x, y) } catch (e: Exception) { false }
+            try { nativeInjectMouseClick(button, x, y) } catch (e: Throwable) { false }
         } else true
     }
 
     fun injectMouseDrag(startX: Int, startY: Int, endX: Int, endY: Int): Boolean {
         return if (isNativeLoaded) {
-            try { nativeInjectMouseDrag(startX, startY, endX, endY) } catch (e: Exception) { false }
+            try { nativeInjectMouseDrag(startX, startY, endX, endY) } catch (e: Throwable) { false }
         } else true
     }
 
     fun injectMouseScroll(direction: String, delta: Int): Boolean {
         return if (isNativeLoaded) {
-            try { nativeInjectMouseScroll(direction, delta) } catch (e: Exception) { false }
+            try { nativeInjectMouseScroll(direction, delta) } catch (e: Throwable) { false }
         } else true
     }
 
     fun injectKeyboardType(text: String): Boolean {
         return if (isNativeLoaded) {
-            try { nativeInjectKeyboardType(text) } catch (e: Exception) { false }
+            try { nativeInjectKeyboardType(text) } catch (e: Throwable) { false }
         } else true
     }
 
     fun injectKeyboardShortcut(keys: List<String>): Boolean {
         return if (isNativeLoaded) {
-            try { nativeInjectKeyboardShortcut(keys.toTypedArray()) } catch (e: Exception) { false }
+            try { nativeInjectKeyboardShortcut(keys.toTypedArray()) } catch (e: Throwable) { false }
         } else true
     }
 
     fun checkBinary(binaryName: String): Boolean {
         try {
             val app = com.localbots.app.LocalBotsApp.instance
-            val rootfsBin = File(app.filesDir, "rootfs/bin/$binaryName")
-            if (rootfsBin.exists()) return true
-            val usrBin = File(app.filesDir, "rootfs/usr/bin/$binaryName")
-            if (usrBin.exists()) return true
-            val appBin = File(app.filesDir, "bin/$binaryName")
-            if (appBin.exists()) return true
-        } catch (ignored: Exception) {}
+            if (app != null) {
+                val rootfsBin = File(app.filesDir, "rootfs/bin/$binaryName")
+                if (rootfsBin.exists()) return true
+                val usrBin = File(app.filesDir, "rootfs/usr/bin/$binaryName")
+                if (usrBin.exists()) return true
+                val appBin = File(app.filesDir, "bin/$binaryName")
+                if (appBin.exists()) return true
+            }
+        } catch (ignored: Throwable) {}
 
         if (isNativeLoaded) {
             try {
                 if (nativeCheckBinary(binaryName)) return true
-            } catch (ignored: Exception) {}
+            } catch (ignored: Throwable) {}
         }
         return executeCommand("which $binaryName", 5).isSuccess
     }
 
     fun mountVfs(hostPath: String, guestPath: String): Boolean {
         return if (isNativeLoaded) {
-            try { nativeMountVfs(hostPath, guestPath) } catch (e: Exception) { true }
+            try { nativeMountVfs(hostPath, guestPath) } catch (e: Throwable) { true }
         } else true
     }
 }

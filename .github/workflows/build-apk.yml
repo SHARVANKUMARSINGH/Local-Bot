@@ -42,10 +42,10 @@ jobs:
       - name: Grant Execute Permission to Gradlew
         run: chmod +x gradlew || true
 
-      - name: Compile and Assemble Debug APKs (Multi-ABI Splits)
+      - name: Run Unit Tests and Assemble Debug APKs
         timeout-minutes: 15
         run: |
-          ./gradlew assembleDebug --stacktrace --no-daemon --console=plain
+          ./gradlew testDebugUnitTest assembleDebug --stacktrace --no-daemon --console=plain
 
       - name: Identify and Organize Generated APKs
         run: |
@@ -53,6 +53,17 @@ jobs:
           find app/build/outputs/apk/debug/ -type f -name "*.apk" -exec cp {} build-artifacts/ \;
           echo "=== Built APK Artifacts ==="
           ls -la build-artifacts/
+
+      - name: Validate APK Integrity and Badging
+        run: |
+          BUILD_TOOLS_DIR=$(find ${ANDROID_HOME}/build-tools -name aapt | head -n 1 | xargs dirname)
+          echo "Using Android Build Tools at: $BUILD_TOOLS_DIR"
+          for apk in build-artifacts/*.apk; do
+            echo "--- Validating $apk ---"
+            unzip -t "$apk" > /dev/null
+            echo "✓ Zip integrity check passed: $apk"
+            "$BUILD_TOOLS_DIR/aapt" dump badging "$apk" | grep -E "package:|application-label:|launchable-activity:|native-code:" || true
+          done
 
       - name: Upload arm64-v8a APK (Primary aarch64)
         uses: actions/upload-artifact@v4
@@ -99,11 +110,17 @@ jobs:
 
             Autonomous AI Computer-Use Agent running natively on Android with an embedded `aarch64` Linux runtime.
 
+            ### Fixes in this build:
+            - **Startup Crash Resolution**: Replaced uninitialized lateinit properties in `LocalBotsApp` with infallible lazy delegates and safe fallbacks.
+            - **Cryptographic Resilience**: Eliminated Keystore/EncryptedSharedPreferences startup crashes by providing safe fallback preferences if StrongBox or AES-GCM provider fails.
+            - **Lazy ViewModel Scoping**: Decoupled ViewModel instantiation in `MainActivity` so background viewmodels don't trigger unhandled coroutines during cold start.
+            - **NDK Static STL**: Switched native compilation to `c++_static` to ensure `libnative-lib.so` is completely self-contained without dynamic dependency issues.
+
             ### Available Download Formats:
-            * **`arm64-v8a` APK**: Primary optimized build for 64-bit ARM Android devices.
-            * **`armeabi-v7a` APK**: Compatible build for older 32-bit ARM devices.
-            * **`x86_64` APK**: Optimized for PC Android Emulators, WSA, and Waydroid.
-            * **`universal` APK**: Universal multi-architecture bundle.
+            * **`app-arm64-v8a-debug.apk`**: Primary optimized build for 64-bit ARM Android devices.
+            * **`app-armeabi-v7a-debug.apk`**: Compatible build for older 32-bit ARM devices.
+            * **`app-x86_64-debug.apk`**: Optimized for PC Android Emulators, WSA, and Waydroid.
+            * **`app-universal-debug.apk`**: Universal multi-architecture bundle.
           files: |
             build-artifacts/*.apk
           draft: false

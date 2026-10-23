@@ -28,7 +28,7 @@ android {
         externalNativeBuild {
             cmake {
                 cppFlags("-std=c++17 -Wall -Wextra -O3")
-                arguments("-DANDROID_STL=c++_shared")
+                arguments("-DANDROID_STL=c++_static")
             }
         }
     }
@@ -128,7 +128,9 @@ dependencies {
     // Image Loading with Coil
     implementation("io.coil-kt:coil-compose:2.6.0")
 
-    // Debugging
+    // Debugging & Testing
     debugImplementation("androidx.compose.ui:ui-tooling")
     debugImplementation("androidx.compose.ui:ui-test-manifest")
+    testImplementation("junit:junit:4.13.2")
+    testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.8.1")
 }
