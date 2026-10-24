@@ -11,6 +11,7 @@ add_library(
     native-lib
     SHARED
     native-lib.cpp
+    pocket_spawn.c
     proot_executor.cpp
     framebuffer_capture.cpp
     input_injector.cpp

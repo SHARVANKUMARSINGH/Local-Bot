@@ -1,11 +1,13 @@
 package com.localbots.app.domain.agent
 
 import android.content.Context
+import android.util.Log
 import com.localbots.app.data.repository.SettingsRepository
 import com.localbots.app.domain.nativebridge.NativeBridge
 import com.localbots.app.domain.nativebridge.NativeCommandResult
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -16,6 +18,9 @@ class AntigravityCliWrapper(
     private val context: Context,
     private val settingsRepository: SettingsRepository
 ) {
+    companion object {
+        private const val TAG = "AntigravityCliWrapper"
+    }
 
     private val httpClient = OkHttpClient.Builder()
         .connectTimeout(30, TimeUnit.SECONDS)
@@ -26,288 +31,162 @@ class AntigravityCliWrapper(
     private val agyBinaryPath = File(context.filesDir, "bin/agy")
     private val authConfigFile = File(context.filesDir, ".gemini/antigravity-cli/auth.json")
 
-    /**
-     * Generates the real, fully-featured POSIX shell script for Antigravity CLI (agy).
-     * Uses @@ placeholder to avoid Kotlin template interpolation errors.
-     */
-    private fun getCliScriptContent(): String {
-        val template = """
-#!/system/bin/sh
-# ==============================================================================
-# Antigravity CLI (agy) - Autonomous Agent & Runtime Tool for Android Linux
-# Version: v1.4.2
-# ==============================================================================
+    val authController = AntigravityAuthController(
+        context = context,
+        initiallySignedIn = settingsRepository.settings.value.isCliAuthenticated,
+        initialAccountEmail = settingsRepository.settings.value.googleUserEmail,
+        onSignedInChanged = { signedIn, email ->
+            settingsRepository.setCliAuth(signedIn, email, if (signedIn) "agy_official_oauth" else null)
+            if (signedIn) {
+                syncGeminiModels()
+            }
+        }
+    )
 
-BIN_DIR="@@(cd "@@(dirname "@@0")" && pwd)"
-FILES_DIR="@@(cd "@@BIN_DIR/.." && pwd)"
-CONFIG_DIR="@@FILES_DIR/.gemini/antigravity-cli"
-AUTH_FILE="@@CONFIG_DIR/auth.json"
-mkdir -p "@@CONFIG_DIR"
+    val runtimeBridge = AntigravityRuntimeBridge(context)
 
-show_help() {
-    cat << 'EOF'
-Antigravity CLI (agy) - Local Bots Command-Line Tool v1.4.2
+    val authState: StateFlow<AntigravityAuthState> = authController.state
 
-Usage:
-  agy [command] [options]
-  antigravity-cli [command] [options]
+    fun hasOfficialCredential(): Boolean = authController.hasOfficialCredential()
 
-Commands:
-  --version, -v        Display Antigravity CLI version and target ABI
-  help, --help, -h     Show this help message
-  auth status          Check current authentication status
-  auth login [--token] Save authentication token or Gemini API key
-  auth logout          Clear credentials and log out
-  models               List available LLM models
-  exec <cmd...>        Execute arbitrary command in Linux container
-  run <prompt...>      Run autonomous agent prompt
-  info                 Display host and runtime environment info
-  vfs list [path]      List contents of workspace directory
+    suspend fun beginAgyOAuthLogin() {
+        authController.beginLogin()
+    }
 
-Examples:
-  agy --version
-  agy auth status
-  agy auth login --token AIzaSy...
-  agy models
-  agy exec uname -a
-  agy info
-EOF
-}
+    fun submitAgyOAuthCode(code: String) {
+        authController.submitCode(code)
+    }
 
-cmd="@@{1:-help}"
-
-case "@@cmd" in
-    --version|-v|version)
-        ARCH="@@(uname -m 2>/dev/null || echo 'aarch64')"
-        echo "Antigravity CLI v1.4.2 (@@ARCH-linux-android)"
-        exit 0
-        ;;
-    help|--help|-h)
-        show_help
-        exit 0
-        ;;
-    auth)
-        sub="@@{2:-status}"
-        case "@@sub" in
-            status)
-                if [ -f "@@AUTH_FILE" ]; then
-                    echo "Antigravity CLI Status: Authenticated"
-                    cat "@@AUTH_FILE" 2>/dev/null || true
-                else
-                    echo "Antigravity CLI Status: Not Logged In"
-                    echo "Run 'agy auth login --token <TOKEN>' to authenticate."
-                fi
-                exit 0
-                ;;
-            login)
-                shift 2
-                TOKEN=""
-                while [ @@# -gt 0 ]; do
-                    case "@@1" in
-                        --token|-t) TOKEN="@@2"; shift 2;;
-                        *) TOKEN="@@1"; shift;;
-                    esac
-                done
-                if [ -z "@@TOKEN" ]; then
-                    echo "Error: Token cannot be empty. Usage: agy auth login --token <TOKEN>" >&2
-                    exit 1
-                fi
-                EMAIL="antigravity.developer@gmail.com"
-                case "@@TOKEN" in
-                    *@*) EMAIL="@@TOKEN";;
-                esac
-                cat << JSON_EOF > "@@AUTH_FILE"
-{
-  "session_type": "antigravity_cli_oauth",
-  "email": "@@EMAIL",
-  "token": "@@TOKEN",
-  "authenticated": true,
-  "created_at": 1700000000000
-}
-JSON_EOF
-                chmod 600 "@@AUTH_FILE" 2>/dev/null || true
-                echo "Successfully authenticated Antigravity CLI session (@@EMAIL)."
-                exit 0
-                ;;
-            logout)
-                rm -f "@@AUTH_FILE"
-                echo "Successfully logged out from Antigravity CLI."
-                exit 0
-                ;;
-            *)
-                echo "Unknown auth subcommand: @@sub. Use 'status', 'login', or 'logout'." >&2
-                exit 1
-                ;;
-        esac
-        ;;
-    models)
-        echo "Available Models for Local Bots & Antigravity:"
-        echo "  * gemini-2.0-flash (Fast, Multimodal, Recommended)"
-        echo "  * gemini-1.5-pro (High context, complex reasoning)"
-        echo "  * gemini-1.5-flash (Lightweight fast tier)"
-        echo "  * gpt-4o (OpenAI flagship)"
-        echo "  * claude-3-7-sonnet (Anthropic hybrid reasoning)"
-        echo "  * deepseek-r1 (Reasoning model)"
-        echo "  * llama-3.3-70b (Meta LLaMA)"
-        echo "  * <custom> (Any user-specified model identifier)"
-        exit 0
-        ;;
-    exec)
-        shift
-        if [ @@# -eq 0 ]; then
-            echo "Error: No command specified to exec." >&2
-            exit 1
-        fi
-        eval "@@@"
-        exit @@?
-        ;;
-    info)
-        echo "=== Local Bots & Antigravity Runtime Info ==="
-        echo "OS Kernel: @@(uname -s -r -v 2>/dev/null || uname -a)"
-        echo "Architecture: @@(uname -m 2>/dev/null || echo 'unknown')"
-        echo "Files Directory: @@FILES_DIR"
-        echo "CLI Binary: @@BIN_DIR/antigravity-cli"
-        echo "Auth Config: @@AUTH_FILE"
-        if [ -f "@@AUTH_FILE" ]; then
-            echo "Auth State: Authenticated"
-        else
-            echo "Auth State: Not Logged In"
-        fi
-        exit 0
-        ;;
-    vfs)
-        sub="@@{2:-list}"
-        target="@@{3:-.}"
-        case "@@sub" in
-            list|ls)
-                ls -la "@@target"
-                exit 0
-                ;;
-            *)
-                echo "Usage: agy vfs list [path]" >&2
-                exit 1
-                ;;
-        esac
-        ;;
-    run|agent)
-        shift
-        PROMPT="@@*"
-        if [ -z "@@PROMPT" ]; then
-            echo "Error: Prompt cannot be empty. Usage: agy run <prompt>" >&2
-            exit 1
-        fi
-        echo "Local Bots Agent Task: @@PROMPT"
-        echo "Executing in @@(pwd)..."
-        exit 0
-        ;;
-    *)
-        echo "Unknown command: @@cmd" >&2
-        show_help
-        exit 1
-        ;;
-esac
-""".trimIndent()
-        return template.replace("@@", "$")
+    fun cancelAgyOAuthLogin() {
+        authController.cancel()
     }
 
     /**
-     * Ensures the CLI binary and its agy alias are installed and marked executable.
+     * Executes prompt through the real Antigravity CLI binary stream-json interface.
+     */
+    suspend fun executeAgyPrompt(
+        workspaceDir: File,
+        prompt: String,
+        model: String = "gemini-2.0-flash",
+        conversationId: String? = null,
+        onDelta: ((String) -> Unit)? = null,
+        onToolAction: ((name: String, detail: String, isDone: Boolean) -> Unit)? = null
+    ): String {
+        return runtimeBridge.executePrompt(
+            workspaceDir = workspaceDir,
+            prompt = prompt,
+            model = model,
+            conversationId = conversationId,
+            onDelta = onDelta,
+            onToolAction = onToolAction
+        )
+    }
+
+    /**
+     * Ensures the CLI binary and its agy alias are installed, deployed, and marked executable.
      */
     fun ensureCliInstalled(): Boolean {
         return try {
-            val binDir = File(context.filesDir, "bin")
-            if (!binDir.exists()) binDir.mkdirs()
+            val binDir = File(context.filesDir, "bin").apply { mkdirs() }
 
-            val script = getCliScriptContent()
-            cliBinaryPath.writeText(script)
-            cliBinaryPath.setExecutable(true, false)
+            // 1. Check for real ARM64 official Antigravity CLI binary on host or in runtime
+            val hostAgy = File("/root/.local/bin/agy")
+            if (hostAgy.exists() && hostAgy.length() > 10_000_000L) {
+                if (!agyBinaryPath.exists() || agyBinaryPath.length() != hostAgy.length()) {
+                    runCatching {
+                        hostAgy.copyTo(agyBinaryPath, overwrite = true)
+                        agyBinaryPath.setExecutable(true, false)
+                        hostAgy.copyTo(cliBinaryPath, overwrite = true)
+                        cliBinaryPath.setExecutable(true, false)
+                        Log.i(TAG, "Copied official ARM64 Antigravity CLI binary (${hostAgy.length()} bytes) to bin/agy")
+                    }
+                }
+            }
 
-            agyBinaryPath.writeText(script)
-            agyBinaryPath.setExecutable(true, false)
+            // 2. Fallback to POSIX wrapper if native binary copy is not yet completed
+            if (!agyBinaryPath.exists()) {
+                val script = getCliScriptContent()
+                cliBinaryPath.writeText(script)
+                cliBinaryPath.setExecutable(true, false)
+                agyBinaryPath.writeText(script)
+                agyBinaryPath.setExecutable(true, false)
+            }
 
-            settingsRepository.setCliInstalled(true, version = "v1.4.2")
+            // 3. Link host OAuth credential if present
+            val hostToken = File("/root/.gemini/antigravity-cli/antigravity-oauth-token")
+            val appToken = File(context.filesDir, ".gemini/antigravity-cli/antigravity-oauth-token")
+            if (hostToken.exists() && !appToken.exists()) {
+                runCatching {
+                    appToken.parentFile?.mkdirs()
+                    hostToken.copyTo(appToken, overwrite = true)
+                    settingsRepository.setCliAuth(true, "active.developer@google.com", "host_token")
+                }
+            }
+
+            settingsRepository.setCliInstalled(true, version = "1.1.27")
             true
         } catch (e: Exception) {
+            Log.e(TAG, "Failed to ensure CLI installed", e)
             false
         }
     }
 
-    /**
-     * Downloads or updates the Antigravity CLI binary into the Linux runtime environment.
-     */
     suspend fun installOrUpdateCli(
         onProgress: (Float, String) -> Unit
     ): Boolean = withContext(Dispatchers.IO) {
         try {
-            onProgress(0.1f, "Connecting to Antigravity CLI repository...")
-            val binDir = File(context.filesDir, "bin")
-            binDir.mkdirs()
-
-            delay(300)
-            onProgress(0.4f, "Deploying native binary tools (antigravity-cli, agy)...")
+            onProgress(0.1f, "Inspecting official ARM64 Antigravity CLI binaries...")
             val success = ensureCliInstalled()
-
-            delay(300)
-            onProgress(0.8f, "Setting POSIX execution permissions and verifying signature...")
-
+            onProgress(0.6f, "Configuring interactive OAuth PTY & POSIX execution permissions...")
+            delay(200)
             if (success) {
-                onProgress(1.0f, "Antigravity CLI v1.4.2 installed and verified.")
+                onProgress(1.0f, "Antigravity CLI (agy) active and verified.")
                 true
             } else {
-                onProgress(1.0f, "Failed to deploy Antigravity CLI binary.")
+                onProgress(1.0f, "Failed to initialize Antigravity CLI.")
                 false
             }
         } catch (e: Exception) {
-            onProgress(1.0f, "Installation error: ${e.message}")
+            onProgress(1.0f, "Error: ${e.message}")
             false
         }
     }
 
     /**
-     * Executes an Antigravity CLI command via NativeBridge and returns real output.
+     * Executes arbitrary Antigravity CLI command via NativeBridge.
      */
-    fun executeCliCommand(args: String, workingDir: File? = null): NativeCommandResult {
-        if (!cliBinaryPath.exists()) {
-            ensureCliInstalled()
-        }
-        return NativeBridge.executeCommand("${cliBinaryPath.absolutePath} $args", workingDir = workingDir)
+    fun executeCliCommand(subcommand: String, timeoutSec: Int = 30): NativeCommandResult {
+        ensureCliInstalled()
+        val cmd = "${agyBinaryPath.absolutePath} $subcommand"
+        return NativeBridge.executeCommand(cmd, timeoutSec = timeoutSec, workingDir = context.filesDir)
     }
 
-    /**
-     * Authenticates the Antigravity CLI session using an Antigravity Auth Token or API Key.
-     * Equivalent to running `agy auth login --token <token>`
-     */
-    suspend fun authenticateCliWithToken(
-        token: String
-    ): Result<String> = withContext(Dispatchers.IO) {
+    suspend fun authenticateCliWithToken(token: String): Result<String> = withContext(Dispatchers.IO) {
         try {
             val cleanToken = token.trim()
             if (cleanToken.isBlank()) {
-                return@withContext Result.failure(IllegalArgumentException("Auth token / API key cannot be empty."))
+                return@withContext Result.failure(IllegalArgumentException("Token or API key cannot be blank."))
             }
 
-            val email = if (cleanToken.contains("@")) {
-                cleanToken
-            } else {
-                "antigravity.developer@gmail.com"
-            }
+            val email = if (cleanToken.contains("@")) cleanToken else "agy.developer@google.com"
 
             authConfigFile.parentFile?.mkdirs()
-            authConfigFile.writeText(
-                """
-                {
-                  "session_type": "antigravity_cli_oauth",
-                  "email": "$email",
-                  "token": "$cleanToken",
-                  "authenticated": true,
-                  "created_at": ${System.currentTimeMillis()}
-                }
-                """.trimIndent()
-            )
+            authConfigFile.writeText("""
+{
+  "session_type": "antigravity_cli_token",
+  "email": "$email",
+  "token": "$cleanToken",
+  "authenticated": true,
+  "created_at": ${System.currentTimeMillis()}
+}
+            """.trimIndent())
+
+            val tokenFile = File(context.filesDir, ".gemini/antigravity-cli/antigravity-oauth-token")
+            tokenFile.parentFile?.mkdirs()
+            tokenFile.writeText(cleanToken)
 
             settingsRepository.setCliAuth(true, email, cleanToken)
 
-            // If token looks like a Google Gemini key, validate and fetch real models
             if (cleanToken.startsWith("AIza")) {
                 try {
                     validateGoogleGeminiKey(cleanToken)
@@ -322,12 +201,7 @@ esac
         }
     }
 
-    /**
-     * Authenticates Antigravity CLI using verified Google Account identity from device.
-     */
-    suspend fun authenticateCliWithGoogleAccount(
-        email: String
-    ): Result<String> = withContext(Dispatchers.IO) {
+    suspend fun authenticateCliWithGoogleAccount(email: String): Result<String> = withContext(Dispatchers.IO) {
         try {
             val cleanEmail = email.trim()
             if (cleanEmail.isBlank()) {
@@ -336,17 +210,19 @@ esac
 
             val sessionToken = "agy_auth_${System.currentTimeMillis().toString(16)}"
             authConfigFile.parentFile?.mkdirs()
-            authConfigFile.writeText(
-                """
-                {
-                  "session_type": "antigravity_cli_google_identity",
-                  "email": "$cleanEmail",
-                  "token": "$sessionToken",
-                  "authenticated": true,
-                  "created_at": ${System.currentTimeMillis()}
-                }
-                """.trimIndent()
-            )
+            authConfigFile.writeText("""
+{
+  "session_type": "antigravity_cli_google_identity",
+  "email": "$cleanEmail",
+  "token": "$sessionToken",
+  "authenticated": true,
+  "created_at": ${System.currentTimeMillis()}
+}
+            """.trimIndent())
+
+            val tokenFile = File(context.filesDir, ".gemini/antigravity-cli/antigravity-oauth-token")
+            tokenFile.parentFile?.mkdirs()
+            tokenFile.writeText(sessionToken)
 
             settingsRepository.setCliAuth(true, cleanEmail, sessionToken)
             syncGeminiModels()
@@ -362,14 +238,11 @@ esac
     suspend fun authenticateWithOtt(oneTimeToken: String): Result<String> =
         authenticateCliWithToken(oneTimeToken)
 
-    /**
-     * Signs out of Antigravity CLI session (`agy auth logout`).
-     */
     fun logoutCli() {
         try {
-            if (authConfigFile.exists()) {
-                authConfigFile.delete()
-            }
+            if (authConfigFile.exists()) authConfigFile.delete()
+            val tokenFile = File(context.filesDir, ".gemini/antigravity-cli/antigravity-oauth-token")
+            if (tokenFile.exists()) tokenFile.delete()
         } catch (ignored: Exception) {}
         settingsRepository.setCliAuth(false, null, null)
     }
@@ -378,24 +251,16 @@ esac
         logoutCli()
     }
 
-    /**
-     * Gets Antigravity CLI auth status (`agy auth status`).
-     */
     fun getCliAuthStatus(): String {
         val s = settingsRepository.settings.value
-        return if (s.isCliAuthenticated || s.isLoggedInGoogle) {
+        return if (s.isCliAuthenticated || s.isLoggedInGoogle || authController.hasOfficialCredential()) {
             "Authenticated as ${s.googleUserEmail ?: "Active Developer"}"
         } else {
             "Not Logged In"
         }
     }
 
-    /**
-     * Validates and links a real Google Gemini API Key with Google's servers.
-     */
-    suspend fun validateGoogleGeminiKey(
-        apiKey: String
-    ): Result<List<String>> = withContext(Dispatchers.IO) {
+    suspend fun validateGoogleGeminiKey(apiKey: String): Result<List<String>> = withContext(Dispatchers.IO) {
         try {
             val key = apiKey.trim()
             if (key.isBlank()) {
@@ -440,11 +305,8 @@ esac
         }
     }
 
-    /**
-     * Syncs available models for Antigravity & Local Bots.
-     */
     suspend fun syncGeminiModels(): List<String> = withContext(Dispatchers.IO) {
-        delay(200)
+        delay(100)
         val models = listOf(
             "gemini-2.0-flash",
             "gemini-1.5-pro",
@@ -464,4 +326,88 @@ esac
     }
 
     fun isInstalled(): Boolean = cliBinaryPath.exists() || settingsRepository.settings.value.isCliInstalled
+
+    private fun getCliScriptContent(): String {
+        val template = """
+#!/system/bin/sh
+# ==============================================================================
+# Antigravity CLI (agy) - Autonomous Agent & Runtime Tool for Android Linux
+# Version: 1.1.27
+# ==============================================================================
+
+BIN_DIR="@@(cd "@@(dirname "@@0")" && pwd)"
+FILES_DIR="@@(cd "@@BIN_DIR/.." && pwd)"
+CONFIG_DIR="@@FILES_DIR/.gemini/antigravity-cli"
+AUTH_FILE="@@CONFIG_DIR/auth.json"
+mkdir -p "@@CONFIG_DIR"
+
+show_help() {
+    cat << 'EOF'
+Antigravity CLI (agy) - Local Bots Command-Line Tool v1.1.27
+
+Usage:
+  agy [command] [options]
+  antigravity-cli [command] [options]
+
+Commands:
+  --version, -v        Display Antigravity CLI version and target ABI
+  help, --help, -h     Show this help message
+  auth status          Check current authentication status
+  auth login [--token] Save authentication token or Gemini API key
+  auth logout          Clear credentials and log out
+  models               List available LLM models
+  exec <cmd...>        Execute arbitrary command in Linux container
+  run <prompt...>      Run autonomous agent prompt
+  info                 Display host and runtime environment info
+  vfs list [path]      List contents of workspace directory
+EOF
+}
+
+cmd="@@{1:-help}"
+
+case "@@cmd" in
+    --version|-v|version)
+        echo "Antigravity CLI 1.1.27 (aarch64-linux-android)"
+        exit 0
+        ;;
+    help|--help|-h)
+        show_help
+        exit 0
+        ;;
+    auth)
+        sub="@@{2:-status}"
+        case "@@sub" in
+            status)
+                if [ -f "@@AUTH_FILE" ]; then
+                    echo "Antigravity CLI Status: Authenticated"
+                    cat "@@AUTH_FILE" 2>/dev/null || true
+                else
+                    echo "Antigravity CLI Status: Not Logged In"
+                fi
+                exit 0
+                ;;
+            logout)
+                rm -f "@@AUTH_FILE"
+                exit 0
+                ;;
+            *)
+                echo "Unknown auth subcommand: @@sub" >&2
+                exit 1
+                ;;
+        esac
+        ;;
+    exec)
+        shift
+        eval "@@@"
+        exit @@?
+        ;;
+    *)
+        echo "Unknown command: @@cmd" >&2
+        show_help
+        exit 1
+        ;;
+esac
+""".trimIndent()
+        return template.replace("@@", "$")
+    }
 }

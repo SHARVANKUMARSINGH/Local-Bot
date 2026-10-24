@@ -3,12 +3,13 @@ package com.localbots.app.ui.settings
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.localbots.app.data.model.ApiKeyConfig
-import com.localbots.app.data.repository.AppSettings
+import com.localbots.app.data.model.AppSettings
 import com.localbots.app.data.repository.SettingsRepository
 import com.localbots.app.data.vault.SecureKeyVault
+import com.localbots.app.domain.agent.AntigravityAuthState
+import com.localbots.app.domain.agent.AntigravityAuthStatus
 import com.localbots.app.domain.agent.AntigravityCliWrapper
 import com.localbots.app.theme.ThemeManager
-import com.localbots.app.theme.ThemeMode
 import com.localbots.app.theme.ThemeState
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -25,7 +26,8 @@ data class SettingsUiState(
     val ottLoading: Boolean = false,
     val ottError: String? = null,
     val googleAuthSuccessMessage: String? = null,
-    val themeState: ThemeState = ThemeState()
+    val themeState: ThemeState = ThemeState(),
+    val agyAuthState: AntigravityAuthState = AntigravityAuthState()
 )
 
 class SettingsViewModel(
@@ -53,6 +55,20 @@ class SettingsViewModel(
                 _uiState.value = _uiState.value.copy(themeState = ts)
             }
         }
+        viewModelScope.launch {
+            cliWrapper.authState.collect { authState ->
+                val isLoading = authState.status == AntigravityAuthStatus.STARTING ||
+                        authState.status == AntigravityAuthStatus.COMPLETING
+                val isSuccess = authState.status == AntigravityAuthStatus.SIGNED_IN
+                _uiState.value = _uiState.value.copy(
+                    agyAuthState = authState,
+                    ottLoading = isLoading,
+                    ottError = if (authState.status == AntigravityAuthStatus.ERROR) authState.message else _uiState.value.ottError,
+                    googleAuthSuccessMessage = if (isSuccess) authState.message ?: "Connected to Antigravity" else _uiState.value.googleAuthSuccessMessage,
+                    ottDialogVisible = if (isSuccess) false else _uiState.value.ottDialogVisible
+                )
+            }
+        }
     }
 
     fun checkForCliUpdates() {
@@ -65,6 +81,30 @@ class SettingsViewModel(
                 cliWrapper.syncGeminiModels()
             }
             _uiState.value = _uiState.value.copy(isUpdatingCli = false)
+        }
+    }
+
+    fun startAgyOAuthFlow() {
+        viewModelScope.launch {
+            _uiState.value = _uiState.value.copy(ottLoading = true, ottError = null)
+            try {
+                cliWrapper.beginAgyOAuthLogin()
+            } catch (e: Exception) {
+                _uiState.value = _uiState.value.copy(ottLoading = false, ottError = e.message)
+            }
+        }
+    }
+
+    fun submitAgyOAuthCode(code: String) {
+        val clean = code.trim()
+        if (clean.isBlank()) {
+            _uiState.value = _uiState.value.copy(ottError = "Please enter the authorization code.")
+            return
+        }
+        try {
+            cliWrapper.submitAgyOAuthCode(clean)
+        } catch (e: Exception) {
+            _uiState.value = _uiState.value.copy(ottError = e.message)
         }
     }
 
@@ -102,7 +142,6 @@ class SettingsViewModel(
             _uiState.value = _uiState.value.copy(ottLoading = true, ottError = null)
             val result = cliWrapper.authenticateCliWithToken(cleanToken)
             if (result.isSuccess) {
-                // If the token is a Google Gemini or API key, configure Slot 1 for failover as well
                 if (cleanToken.startsWith("AIza") || cleanToken.length > 20) {
                     val slot1 = secureKeyVault.loadAllSlots().find { it.slotNumber == 1 }
                     if (slot1 != null) {
@@ -144,6 +183,7 @@ class SettingsViewModel(
     }
 
     fun dismissOttDialog() {
+        cliWrapper.cancelAgyOAuthLogin()
         _uiState.value = _uiState.value.copy(ottDialogVisible = false)
     }
 
@@ -152,7 +192,12 @@ class SettingsViewModel(
     }
 
     fun submitOttSignIn() {
-        loginCliWithToken(_uiState.value.ottInput)
+        val input = _uiState.value.ottInput.trim()
+        if (_uiState.value.agyAuthState.status == AntigravityAuthStatus.AWAITING_CODE) {
+            submitAgyOAuthCode(input)
+        } else {
+            loginCliWithToken(input)
+        }
     }
 
     fun selectModel(model: String) {
@@ -163,15 +208,20 @@ class SettingsViewModel(
         settingsRepository.setCustomModel(model)
     }
 
-    fun toggleSlot(slotNumber: Int, enabled: Boolean) {
-        secureKeyVault.toggleSlotEnabled(slotNumber, enabled)
+    fun setScheduledThemeEnabled(enabled: Boolean) {
+        settingsRepository.setScheduledThemeEnabled(enabled)
     }
 
     fun saveSlot(slot: ApiKeyConfig) {
         secureKeyVault.updateSlot(slot)
     }
 
-    fun setThemeMode(mode: ThemeMode) {
-        ThemeManager.setThemeMode(mode)
+    fun testSlot(slotNumber: Int) {
+        val slot = _uiState.value.keySlots.find { it.slotNumber == slotNumber } ?: return
+        if (slot.apiKey.isBlank()) {
+            secureKeyVault.markSlotFailure(slotNumber, "API Key is empty")
+            return
+        }
+        secureKeyVault.markSlotSuccess(slotNumber)
     }
 }

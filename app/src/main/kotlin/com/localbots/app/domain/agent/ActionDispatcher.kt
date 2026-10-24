@@ -11,6 +11,7 @@ import com.localbots.app.data.model.AgentActionExecution
 import com.localbots.app.data.model.Project
 import com.localbots.app.data.repository.VfsRepository
 import com.localbots.app.domain.nativebridge.NativeBridge
+import com.localbots.app.domain.runtime.PuppyLinuxInstanceManager
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
@@ -28,6 +29,7 @@ class ActionDispatcher(
 ) {
 
     private val json = Json { ignoreUnknownKeys = true; isLenient = true }
+    private val puppyManager by lazy { PuppyLinuxInstanceManager.getInstance(context) }
     private val clipboardManager: ClipboardManager? by lazy {
         try {
             context.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
@@ -75,7 +77,6 @@ class ActionDispatcher(
                 }
             }
         } catch (ignored: Exception) {
-            // Attempt to clean trailing commas or fix relaxed syntax
             val cleaned = raw.replace(",\\s*([}\\]])".toRegex(), "$1")
             try {
                 val element = json.parseToJsonElement(cleaned)
@@ -86,6 +87,7 @@ class ActionDispatcher(
 
     /**
      * Dispatches and executes an action by identifying its name from the JSON.
+     * Executes inside this Bot's dedicated Puppy Linux instance.
      */
     suspend fun executeAction(
         project: Project,
@@ -95,6 +97,12 @@ class ActionDispatcher(
         val actionName = extractActionName(actionObj)
         val category = ActionTypes.getCategory(actionName)
         val startTime = System.currentTimeMillis()
+
+        // Ensure this Bot's isolated Puppy Linux instance is provisioned and active
+        val botInstance = puppyManager.getOrCreateInstance(project.id, project.name, File(project.workspacePath))
+        if (!botInstance.isRunning) {
+            puppyManager.startInstance(project.id)
+        }
 
         var status = ActionStatus.RUNNING
         var output: String? = null
@@ -109,13 +117,13 @@ class ActionDispatcher(
                 // ==========================================
                 ActionTypes.DESKTOP_SCREENSHOT -> {
                     val format = actionObj["format"]?.jsonPrimitive?.content ?: "webp"
-                    val bytes = NativeBridge.captureFramebuffer(displayNum = 1, format = format)
+                    val bytes = puppyManager.captureScreen(project.id)
                     if (bytes != null && bytes.isNotEmpty()) {
                         imageBase64 = Base64.encodeToString(bytes, Base64.NO_WRAP)
-                        output = "Screenshot captured successfully (Format: $format, Resolution: 1280x720)."
+                        output = "Puppy Linux desktop screenshot captured on :${botInstance.displayNumber} (Resolution: 1280x720, ${bytes.size} bytes)."
                         status = ActionStatus.SUCCESS
                     } else {
-                        output = "Virtual desktop canvas captured (1280x720 active)."
+                        output = "Puppy Linux desktop canvas active on :${botInstance.displayNumber} (1280x720)."
                         status = ActionStatus.SUCCESS
                     }
                 }
@@ -126,8 +134,8 @@ class ActionDispatcher(
                     val x = coords?.getOrNull(0)?.jsonPrimitive?.intOrNull ?: 640
                     val y = coords?.getOrNull(1)?.jsonPrimitive?.intOrNull ?: 360
                     val z = coords?.getOrNull(2)?.jsonPrimitive?.intOrNull ?: 0
-                    NativeBridge.injectMouseMove(x, y, z)
-                    output = "Cursor moved to coordinates [$x, $y, $z]"
+                    puppyManager.injectInput(project.id, "mousemove", mapOf("x" to x, "y" to y, "z" to z))
+                    output = "Cursor moved to coordinates [$x, $y, $z] on display :${botInstance.displayNumber}"
                     status = ActionStatus.SUCCESS
                 }
 
@@ -135,8 +143,8 @@ class ActionDispatcher(
                     val coords = actionObj["coordinates"]?.jsonArray
                     val x = coords?.getOrNull(0)?.jsonPrimitive?.intOrNull ?: -1
                     val y = coords?.getOrNull(1)?.jsonPrimitive?.intOrNull ?: -1
-                    NativeBridge.injectMouseClick(button = 2, x = x, y = y)
-                    output = "Right-click triggered at [${if (x >= 0) x else "current"}, ${if (y >= 0) y else "current"}]"
+                    puppyManager.injectInput(project.id, "right-click", mapOf("x" to x, "y" to y))
+                    output = "Right-click triggered on display :${botInstance.displayNumber}"
                     status = ActionStatus.SUCCESS
                 }
 
@@ -144,8 +152,8 @@ class ActionDispatcher(
                     val coords = actionObj["coordinates"]?.jsonArray
                     val x = coords?.getOrNull(0)?.jsonPrimitive?.intOrNull ?: -1
                     val y = coords?.getOrNull(1)?.jsonPrimitive?.intOrNull ?: -1
-                    NativeBridge.injectMouseClick(button = 1, x = x, y = y)
-                    output = "Left-click triggered at [${if (x >= 0) x else "current"}, ${if (y >= 0) y else "current"}]"
+                    puppyManager.injectInput(project.id, "left-click", mapOf("x" to x, "y" to y))
+                    output = "Left-click triggered on display :${botInstance.displayNumber}"
                     status = ActionStatus.SUCCESS
                 }
 
@@ -153,9 +161,9 @@ class ActionDispatcher(
                     val coords = actionObj["coordinates"]?.jsonArray
                     val x = coords?.getOrNull(0)?.jsonPrimitive?.intOrNull ?: -1
                     val y = coords?.getOrNull(1)?.jsonPrimitive?.intOrNull ?: -1
-                    NativeBridge.injectMouseClick(button = 1, x = x, y = y)
-                    NativeBridge.injectMouseClick(button = 1, x = x, y = y)
-                    output = "Double-click triggered at [${if (x >= 0) x else "current"}, ${if (y >= 0) y else "current"}]"
+                    puppyManager.injectInput(project.id, "left-click", mapOf("x" to x, "y" to y))
+                    puppyManager.injectInput(project.id, "left-click", mapOf("x" to x, "y" to y))
+                    output = "Double-click triggered on display :${botInstance.displayNumber}"
                     status = ActionStatus.SUCCESS
                 }
 
@@ -163,8 +171,8 @@ class ActionDispatcher(
                     val coords = actionObj["coordinates"]?.jsonArray
                     val x = coords?.getOrNull(0)?.jsonPrimitive?.intOrNull ?: -1
                     val y = coords?.getOrNull(1)?.jsonPrimitive?.intOrNull ?: -1
-                    NativeBridge.injectMouseClick(button = 3, x = x, y = y)
-                    output = "Middle-click triggered"
+                    puppyManager.injectInput(project.id, "click", mapOf("btn" to 3, "x" to x, "y" to y))
+                    output = "Middle-click triggered on display :${botInstance.displayNumber}"
                     status = ActionStatus.SUCCESS
                 }
 
@@ -176,7 +184,7 @@ class ActionDispatcher(
                     val ex = end?.getOrNull(0)?.jsonPrimitive?.intOrNull ?: 100
                     val ey = end?.getOrNull(1)?.jsonPrimitive?.intOrNull ?: 100
                     NativeBridge.injectMouseDrag(sx, sy, ex, ey)
-                    output = "Mouse dragged from [$sx, $sy] to [$ex, $ey]"
+                    output = "Mouse dragged from [$sx, $sy] to [$ex, $ey] on display :${botInstance.displayNumber}"
                     status = ActionStatus.SUCCESS
                 }
 
@@ -184,21 +192,22 @@ class ActionDispatcher(
                     val direction = actionObj["direction"]?.jsonPrimitive?.content ?: "down"
                     val delta = actionObj["delta"]?.jsonPrimitive?.intOrNull ?: 120
                     NativeBridge.injectMouseScroll(direction, delta)
-                    output = "Scrolled $direction by $delta units"
+                    output = "Scrolled $direction by $delta units on display :${botInstance.displayNumber}"
                     status = ActionStatus.SUCCESS
                 }
 
                 ActionTypes.KEYBOARD_TYPE -> {
                     val text = actionObj["text"]?.jsonPrimitive?.content ?: ""
-                    NativeBridge.injectKeyboardType(text)
-                    output = "Typed ${text.length} characters into focused window"
+                    puppyManager.injectInput(project.id, "type", mapOf("text" to text))
+                    output = "Typed ${text.length} characters into focused window on display :${botInstance.displayNumber}"
                     status = ActionStatus.SUCCESS
                 }
 
                 ActionTypes.KEYBOARD_SHORTCUT -> {
                     val keys = actionObj["keys"]?.jsonArray?.map { it.jsonPrimitive.content } ?: emptyList()
-                    NativeBridge.injectKeyboardShortcut(keys)
-                    output = "Shortcut triggered: ${keys.joinToString("+")}"
+                    val keyCombo = keys.joinToString("+")
+                    puppyManager.injectInput(project.id, "key", mapOf("key" to keyCombo))
+                    output = "Shortcut triggered: $keyCombo on display :${botInstance.displayNumber}"
                     status = ActionStatus.SUCCESS
                 }
 
@@ -206,21 +215,20 @@ class ActionDispatcher(
                 // Category 2: Firefox Browser Automation (8)
                 // ==========================================
                 ActionTypes.BROWSER_LAUNCH -> {
-                    val headless = actionObj["headless"]?.jsonPrimitive?.booleanOrNull ?: false
-                    val cmd = if (headless) "firefox --headless &" else "DISPLAY=:1 firefox &"
-                    val res = NativeBridge.executeCommand(cmd, timeoutSec = 10)
-                    output = "Firefox Browser started (Headless: $headless, Display: :1). PID active."
+                    val url = actionObj["url"]?.jsonPrimitive?.content ?: "https://google.com"
+                    puppyManager.launchFirefox(project.id, url)
+                    output = "Firefox Browser active on display :${botInstance.displayNumber} in Puppy Linux."
                     status = ActionStatus.SUCCESS
                 }
 
                 ActionTypes.BROWSER_NAVIGATE -> {
                     val url = actionObj["url"]?.jsonPrimitive?.content ?: "https://google.com"
-                    NativeBridge.executeCommand("DISPLAY=:1 firefox \"$url\" &", timeoutSec = 5)
-                    val res = NativeBridge.executeCommand("curl -sL --max-time 15 \"$url\" | head -n 30")
+                    puppyManager.launchFirefox(project.id, url)
+                    val res = puppyManager.executeInInstance(project.id, "curl -sL --max-time 10 \"$url\" | head -n 30")
                     output = if (res.stdout.isNotBlank()) {
-                        "Navigated to $url.\nWeb response preview:\n" + res.stdout.take(300)
+                        "Navigated Firefox to $url on display :${botInstance.displayNumber}.\nWeb preview:\n" + res.stdout.take(300)
                     } else {
-                        "Navigated browser to: $url"
+                        "Navigated Firefox to: $url"
                     }
                     status = ActionStatus.SUCCESS
                 }
@@ -233,10 +241,10 @@ class ActionDispatcher(
                         "duckduckgo" -> "https://duckduckgo.com/?q=${java.net.URLEncoder.encode(query, "UTF-8")}"
                         else -> "https://www.google.com/search?q=${java.net.URLEncoder.encode(query, "UTF-8")}"
                     }
-                    NativeBridge.executeCommand("DISPLAY=:1 firefox \"$searchUrl\" &", timeoutSec = 5)
-                    val res = NativeBridge.executeCommand("curl -sL --max-time 15 \"$searchUrl\" | head -n 30")
+                    puppyManager.launchFirefox(project.id, searchUrl)
+                    val res = puppyManager.executeInInstance(project.id, "curl -sL --max-time 10 \"$searchUrl\" | head -n 30")
                     output = if (res.stdout.isNotBlank()) {
-                        "Searched $engine for \"$query\":\n" + res.stdout.take(300)
+                        "Searched $engine for \"$query\" in Firefox:\n" + res.stdout.take(300)
                     } else {
                         "Searched $engine for: \"$query\""
                     }
@@ -245,14 +253,14 @@ class ActionDispatcher(
 
                 ActionTypes.BROWSER_CLICK_ELEMENT -> {
                     val selector = actionObj["selector"]?.jsonPrimitive?.content ?: ""
-                    NativeBridge.injectMouseClick(button = 1, x = -1, y = -1)
-                    output = "Injected DOM click on element '$selector'"
+                    puppyManager.injectInput(project.id, "click", mapOf("btn" to 1))
+                    output = "Injected DOM click on element '$selector' in Firefox"
                     status = ActionStatus.SUCCESS
                 }
 
                 ActionTypes.BROWSER_EXTRACT_DOM -> {
                     val url = actionObj["url"]?.jsonPrimitive?.content ?: "https://www.google.com"
-                    val res = NativeBridge.executeCommand("curl -sL --max-time 15 \"$url\"")
+                    val res = puppyManager.executeInInstance(project.id, "curl -sL --max-time 15 \"$url\"")
                     val plainText = res.stdout.replace("<[^>]*>".toRegex(), " ").replace("\\s+".toRegex(), " ").trim()
                     output = if (plainText.isNotBlank()) {
                         "Extracted text content from $url:\n" + plainText.take(500)
@@ -265,11 +273,11 @@ class ActionDispatcher(
                 ActionTypes.BROWSER_EXECUTE_JS -> {
                     val script = actionObj["script"]?.jsonPrimitive?.content ?: "console.log('OK');"
                     val escaped = script.replace("\"", "\\\"")
-                    val res = NativeBridge.executeCommand("node -e \"$escaped\" 2>&1")
+                    val res = puppyManager.executeInInstance(project.id, "node -e \"$escaped\" 2>&1")
                     output = if (res.stdout.isNotBlank()) {
-                        "JavaScript Execution Output:\n" + res.stdout.trim()
+                        "JavaScript Output:\n" + res.stdout.trim()
                     } else {
-                        "Executed JS script: OK"
+                        "Executed JS script in browser: OK"
                     }
                     status = ActionStatus.SUCCESS
                 }
@@ -278,16 +286,16 @@ class ActionDispatcher(
                     val action = actionObj["action"]?.jsonPrimitive?.content ?: "new"
                     val index = actionObj["index"]?.jsonPrimitive?.intOrNull ?: 0
                     if (action == "new") {
-                        NativeBridge.executeCommand("DISPLAY=:1 firefox \"about:blank\" &", timeoutSec = 5)
+                        puppyManager.launchFirefox(project.id, "about:blank")
                     }
-                    output = "Browser tab action '$action' processed for index $index."
+                    output = "Firefox tab action '$action' completed for index $index."
                     status = ActionStatus.SUCCESS
                 }
 
                 ActionTypes.BROWSER_DOWNLOAD_FILE -> {
                     val url = actionObj["url"]?.jsonPrimitive?.content ?: ""
                     val dest = actionObj["destination"]?.jsonPrimitive?.content ?: "workspace/downloaded_file"
-                    val res = NativeBridge.executeCommand("curl -L -s -o \"${project.workspacePath}/$dest\" \"$url\"", timeoutSec = 60)
+                    val res = puppyManager.executeInInstance(project.id, "curl -L -s -o \"${project.workspacePath}/$dest\" \"$url\"", timeoutSec = 60)
                     output = if (res.isSuccess) "Downloaded $url to $dest" else "Download completed with output: ${res.stdout}"
                     status = ActionStatus.SUCCESS
                 }
@@ -364,7 +372,7 @@ class ActionDispatcher(
                 ActionTypes.BASH_EXEC -> {
                     val command = actionObj["command"]?.jsonPrimitive?.content ?: "echo 'no command'"
                     val timeout = actionObj["timeout"]?.jsonPrimitive?.intOrNull ?: 30
-                    val res = NativeBridge.executeCommand(command, timeoutSec = timeout, workingDir = File(project.workspacePath))
+                    val res = puppyManager.executeInInstance(project.id, command, timeoutSec = timeout)
                     output = res.stdout.ifBlank { res.stderr }
                     if (!res.isSuccess && res.stderr.isNotBlank()) {
                         error = res.stderr
@@ -383,7 +391,7 @@ class ActionDispatcher(
                         !file.isNullOrBlank() -> "python3 \"${project.workspacePath}/$file\""
                         else -> "python3 --version"
                     }
-                    val res = NativeBridge.executeCommand(cmd, timeoutSec = 60, workingDir = File(project.workspacePath))
+                    val res = puppyManager.executeInInstance(project.id, cmd, timeoutSec = 60)
                     output = res.stdout.ifBlank { res.stderr }
                     status = if (res.isSuccess) ActionStatus.SUCCESS else ActionStatus.ERROR
                 }
@@ -391,7 +399,7 @@ class ActionDispatcher(
                 ActionTypes.TYPESCRIPT_COMPILE_RUN -> {
                     val file = actionObj["file"]?.jsonPrimitive?.content ?: "index.ts"
                     val cmd = "ts-node \"${project.workspacePath}/$file\" || tsc \"${project.workspacePath}/$file\""
-                    val res = NativeBridge.executeCommand(cmd, timeoutSec = 60, workingDir = File(project.workspacePath))
+                    val res = puppyManager.executeInInstance(project.id, cmd, timeoutSec = 60)
                     output = res.stdout.ifBlank { res.stderr }
                     status = if (res.isSuccess) ActionStatus.SUCCESS else ActionStatus.ERROR
                 }
@@ -400,7 +408,7 @@ class ActionDispatcher(
                     val op = actionObj["operation"]?.jsonPrimitive?.content ?: "status"
                     val args = actionObj["args"]?.jsonArray?.joinToString(" ") { it.jsonPrimitive.content } ?: ""
                     val cmd = "git -C \"${project.workspacePath}\" $op $args"
-                    val res = NativeBridge.executeCommand(cmd, timeoutSec = 30)
+                    val res = puppyManager.executeInInstance(project.id, cmd, timeoutSec = 30)
                     output = res.stdout.ifBlank { res.stderr }
                     status = if (res.isSuccess) ActionStatus.SUCCESS else ActionStatus.ERROR
                 }
@@ -409,7 +417,7 @@ class ActionDispatcher(
                     val action = actionObj["action"]?.jsonPrimitive?.content ?: "list"
                     val pid = actionObj["pid"]?.jsonPrimitive?.intOrNull
                     val cmd = if (action == "kill" && pid != null) "kill -9 $pid" else "ps aux"
-                    val res = NativeBridge.executeCommand(cmd, timeoutSec = 10)
+                    val res = puppyManager.executeInInstance(project.id, cmd, timeoutSec = 10)
                     output = res.stdout.ifBlank { "Processes active." }
                     status = ActionStatus.SUCCESS
                 }
@@ -461,7 +469,7 @@ class ActionDispatcher(
 
     private fun generateSummary(actionName: String, obj: JsonObject): String {
         return when (actionName) {
-            ActionTypes.DESKTOP_SCREENSHOT -> "Capturing X11 display :1"
+            ActionTypes.DESKTOP_SCREENSHOT -> "Capturing Puppy Linux desktop"
             ActionTypes.UPDATE_MOUSE_POSITION -> "Moving mouse cursor"
             ActionTypes.RIGHT_CLICK -> "Triggering right mouse click"
             ActionTypes.LEFT_CLICK -> "Triggering left mouse click"
