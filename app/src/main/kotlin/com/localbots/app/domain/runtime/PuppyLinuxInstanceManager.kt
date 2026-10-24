@@ -214,7 +214,7 @@ FRAMEBUFFER="$fbFile"
             }
             "keyboard-shortcut", "key" -> {
                 val key = params["key"]?.toString() ?: params["shortcut"]?.toString() ?: "Return"
-                NativeBridge.injectKeyboardShortcut(arrayOf(key))
+                NativeBridge.injectKeyboardShortcut(listOf(key))
                 val cmd = "DISPLAY=$display /usr/bin/xdotool key $key"
                 NativeBridge.executeCommand(cmd, workingDir = botInstance.instanceDir)
                 true

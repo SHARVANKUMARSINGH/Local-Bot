@@ -5,9 +5,12 @@ import android.util.Log
 import com.localbots.app.data.repository.SettingsRepository
 import com.localbots.app.domain.nativebridge.NativeBridge
 import com.localbots.app.domain.nativebridge.NativeCommandResult
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -22,6 +25,7 @@ class AntigravityCliWrapper(
         private const val TAG = "AntigravityCliWrapper"
     }
 
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val httpClient = OkHttpClient.Builder()
         .connectTimeout(30, TimeUnit.SECONDS)
         .readTimeout(60, TimeUnit.SECONDS)
@@ -38,7 +42,11 @@ class AntigravityCliWrapper(
         onSignedInChanged = { signedIn, email ->
             settingsRepository.setCliAuth(signedIn, email, if (signedIn) "agy_official_oauth" else null)
             if (signedIn) {
-                syncGeminiModels()
+                scope.launch {
+                    try {
+                        syncGeminiModels()
+                    } catch (ignored: Exception) {}
+                }
             }
         }
     )

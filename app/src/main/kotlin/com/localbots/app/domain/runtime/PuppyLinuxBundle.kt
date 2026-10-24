@@ -26,7 +26,7 @@ class PuppyLinuxBundle(private val context: Context) {
      * JWM desktop files, Firefox browser binaries, and system libraries.
      */
     fun ensureMasterBundleInstalled(): Boolean {
-        try {
+        return try {
             masterRootfsDir.mkdirs()
 
             // 1. Create standard Unix directory hierarchy
@@ -275,7 +275,7 @@ else
 import os
 w, h = 1280, 720
 fb = bytearray([35, 45, 60, 255] * (w * h))
-with open('$FB_PATH', 'wb') as f:
+with open('@@FB_PATH', 'wb') as f:
     f.write(fb)
 " 2>/dev/null || dd if=/dev/zero of="@@FB_PATH" bs=1024 count=3600 2>/dev/null
 fi

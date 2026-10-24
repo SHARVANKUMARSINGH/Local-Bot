@@ -3,13 +3,14 @@ package com.localbots.app.ui.settings
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.localbots.app.data.model.ApiKeyConfig
-import com.localbots.app.data.model.AppSettings
+import com.localbots.app.data.repository.AppSettings
 import com.localbots.app.data.repository.SettingsRepository
 import com.localbots.app.data.vault.SecureKeyVault
 import com.localbots.app.domain.agent.AntigravityAuthState
 import com.localbots.app.domain.agent.AntigravityAuthStatus
 import com.localbots.app.domain.agent.AntigravityCliWrapper
 import com.localbots.app.theme.ThemeManager
+import com.localbots.app.theme.ThemeMode
 import com.localbots.app.theme.ThemeState
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -209,7 +210,16 @@ class SettingsViewModel(
     }
 
     fun setScheduledThemeEnabled(enabled: Boolean) {
-        settingsRepository.setScheduledThemeEnabled(enabled)
+        val mode = if (enabled) ThemeMode.SCHEDULED_GOOGLE_PALETTE else ThemeMode.SYSTEM_DYNAMIC
+        ThemeManager.setThemeMode(mode)
+    }
+
+    fun setThemeMode(mode: ThemeMode) {
+        ThemeManager.setThemeMode(mode)
+    }
+
+    fun toggleSlot(slotNumber: Int, enabled: Boolean) {
+        secureKeyVault.toggleSlotEnabled(slotNumber, enabled)
     }
 
     fun saveSlot(slot: ApiKeyConfig) {
