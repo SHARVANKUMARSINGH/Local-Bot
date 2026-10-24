@@ -209,44 +209,15 @@ class AntigravityCliWrapper(
         }
     }
 
-    suspend fun authenticateCliWithGoogleAccount(email: String): Result<String> = withContext(Dispatchers.IO) {
-        try {
-            val cleanEmail = email.trim()
-            if (cleanEmail.isBlank()) {
-                return@withContext Result.failure(IllegalArgumentException("Account email cannot be empty."))
-            }
-
-            val sessionToken = "agy_auth_${System.currentTimeMillis().toString(16)}"
-            authConfigFile.parentFile?.mkdirs()
-            authConfigFile.writeText("""
-{
-  "session_type": "antigravity_cli_google_identity",
-  "email": "$cleanEmail",
-  "token": "$sessionToken",
-  "authenticated": true,
-  "created_at": ${System.currentTimeMillis()}
-}
-            """.trimIndent())
-
-            val tokenFile = File(context.filesDir, ".gemini/antigravity-cli/antigravity-oauth-token")
-            tokenFile.parentFile?.mkdirs()
-            tokenFile.writeText(sessionToken)
-
-            settingsRepository.setCliAuth(true, cleanEmail, sessionToken)
-            syncGeminiModels()
-            Result.success(cleanEmail)
-        } catch (e: Exception) {
-            Result.failure(e)
-        }
-    }
-
-    suspend fun authenticateWithGoogleAccount(email: String): Result<String> =
-        authenticateCliWithGoogleAccount(email)
-
     suspend fun authenticateWithOtt(oneTimeToken: String): Result<String> =
         authenticateCliWithToken(oneTimeToken)
 
     fun logoutCli() {
+        scope.launch {
+            try {
+                authController.logout()
+            } catch (ignored: Exception) {}
+        }
         try {
             if (authConfigFile.exists()) authConfigFile.delete()
             val tokenFile = File(context.filesDir, ".gemini/antigravity-cli/antigravity-oauth-token")

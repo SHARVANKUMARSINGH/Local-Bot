@@ -109,28 +109,6 @@ class SettingsViewModel(
         }
     }
 
-    fun onGoogleAccountSelected(email: String) {
-        loginCliWithGoogleAccount(email)
-    }
-
-    fun loginCliWithGoogleAccount(email: String) {
-        viewModelScope.launch {
-            _uiState.value = _uiState.value.copy(ottLoading = true, ottError = null)
-            val result = cliWrapper.authenticateCliWithGoogleAccount(email)
-            if (result.isSuccess) {
-                _uiState.value = _uiState.value.copy(
-                    ottLoading = false,
-                    ottDialogVisible = false,
-                    googleAuthSuccessMessage = "Antigravity CLI Authenticated ($email)"
-                )
-            } else {
-                _uiState.value = _uiState.value.copy(
-                    ottLoading = false,
-                    ottError = result.exceptionOrNull()?.message ?: "Failed to authenticate Antigravity CLI."
-                )
-            }
-        }
-    }
 
     fun loginCliWithToken(token: String) {
         val cleanToken = token.trim()

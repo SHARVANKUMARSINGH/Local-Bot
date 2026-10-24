@@ -1,11 +1,7 @@
 package com.localbots.app.ui.settings
 
-import android.accounts.AccountManager
-import android.app.Activity
 import android.content.Intent
 import android.net.Uri
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -28,6 +24,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.AccountCircle
 import androidx.compose.material.icons.rounded.CheckCircle
 import androidx.compose.material.icons.rounded.CloudSync
+import androidx.compose.material.icons.rounded.ContentCopy
 import androidx.compose.material.icons.rounded.DarkMode
 import androidx.compose.material.icons.rounded.Key
 import androidx.compose.material.icons.rounded.LightMode
@@ -49,6 +46,7 @@ import androidx.compose.material3.ExposedDropdownMenuBox
 import androidx.compose.material3.ExposedDropdownMenuDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
@@ -61,6 +59,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -69,12 +68,15 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.localbots.app.data.model.ApiKeyConfig
+import com.localbots.app.domain.agent.AntigravityAuthStatus
 import com.localbots.app.theme.ThemeMode
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -84,35 +86,19 @@ fun SettingsScreen(
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
+    val clipboard = LocalClipboardManager.current
     val state by viewModel.uiState.collectAsState()
+    val auth = state.agyAuthState
     var editingSlot by remember { mutableStateOf<ApiKeyConfig?>(null) }
     var modelMenuExpanded by remember { mutableStateOf(false) }
 
-    val accountPickerLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.StartActivityForResult()
-    ) { result ->
-        if (result.resultCode == Activity.RESULT_OK && result.data != null) {
-            val accountName = result.data?.getStringExtra(AccountManager.KEY_ACCOUNT_NAME)
-            if (!accountName.isNullOrBlank()) {
-                viewModel.onGoogleAccountSelected(accountName)
+    // When the real Google OAuth PKCE URL arrives, automatically open the browser
+    LaunchedEffect(auth.authorizationUrl) {
+        auth.authorizationUrl?.let { url ->
+            runCatching {
+                val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                context.startActivity(intent)
             }
-        }
-    }
-
-    fun launchGoogleSignIn() {
-        try {
-            val intent = AccountManager.newChooseAccountIntent(
-                null,
-                null,
-                arrayOf("com.google"),
-                null,
-                null,
-                null,
-                null
-            )
-            accountPickerLauncher.launch(intent)
-        } catch (e: Exception) {
-            viewModel.showOttDialog()
         }
     }
 
@@ -219,8 +205,11 @@ fun SettingsScreen(
 
                         Spacer(modifier = Modifier.height(14.dp))
 
-                        // Active Antigravity CLI Session Status Badge
-                        if (state.appSettings.isLoggedInGoogle || state.appSettings.isCliAuthenticated) {
+                        // Official Antigravity CLI OAuth Status & Interactive Flow (Ported from Mobile-Harness)
+                        val isConnected = auth.status == AntigravityAuthStatus.SIGNED_IN ||
+                            (auth.status == AntigravityAuthStatus.SIGNED_OUT && (state.appSettings.isLoggedInGoogle || state.appSettings.isCliAuthenticated))
+
+                        if (isConnected) {
                             Surface(
                                 modifier = Modifier.fillMaxWidth(),
                                 shape = RoundedCornerShape(12.dp),
@@ -239,13 +228,13 @@ fun SettingsScreen(
                                     Spacer(modifier = Modifier.width(12.dp))
                                     Column(modifier = Modifier.weight(1f)) {
                                         Text(
-                                            text = "Antigravity CLI Authenticated",
+                                            text = "Official Antigravity CLI Connected",
                                             style = MaterialTheme.typography.labelLarge,
                                             fontWeight = FontWeight.Bold,
                                             color = MaterialTheme.colorScheme.onPrimaryContainer
                                         )
                                         Text(
-                                            text = "${state.appSettings.googleUserEmail ?: "Active Developer Profile"}\nModel Engine: ${state.appSettings.selectedModel}",
+                                            text = "${auth.accountEmail ?: state.appSettings.googleUserEmail ?: "Google Account"}\nActive Engine: ${state.appSettings.selectedModel}",
                                             style = MaterialTheme.typography.labelSmall,
                                             color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.85f)
                                         )
@@ -261,30 +250,143 @@ fun SettingsScreen(
                                     }
                                 }
                             }
-                        } else {
+                        } else if (auth.status == AntigravityAuthStatus.STARTING || auth.status == AntigravityAuthStatus.COMPLETING) {
+                            Column(
+                                modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp),
+                                verticalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+                                Text(
+                                    text = auth.message ?: "Starting Google sign-in...",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.primary
+                                )
+                            }
+                        } else if (auth.status == AntigravityAuthStatus.AWAITING_CODE) {
                             Column(
                                 modifier = Modifier.fillMaxWidth(),
                                 verticalArrangement = Arrangement.spacedBy(8.dp)
                             ) {
+                                Text(
+                                    text = "Google Sign-In opened in your browser. Copy the one-time code and paste it below:",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
+
+                                auth.authorizationUrl?.let { url ->
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                    ) {
+                                        Button(
+                                            onClick = {
+                                                runCatching {
+                                                    val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                                                    context.startActivity(intent)
+                                                }
+                                            },
+                                            modifier = Modifier.weight(1f),
+                                            shape = RoundedCornerShape(10.dp)
+                                        ) {
+                                            Icon(Icons.Rounded.OpenInNew, contentDescription = null, modifier = Modifier.size(16.dp))
+                                            Spacer(Modifier.width(6.dp))
+                                            Text("Open URL")
+                                        }
+
+                                        OutlinedButton(
+                                            onClick = { clipboard.setText(AnnotatedString(url)) },
+                                            modifier = Modifier.weight(1f),
+                                            shape = RoundedCornerShape(10.dp)
+                                        ) {
+                                            Icon(Icons.Rounded.ContentCopy, contentDescription = null, modifier = Modifier.size(16.dp))
+                                            Spacer(Modifier.width(6.dp))
+                                            Text("Copy URL")
+                                        }
+                                    }
+                                }
+
+                                OutlinedTextField(
+                                    value = state.ottInput,
+                                    onValueChange = { viewModel.onOttInputChanged(it) },
+                                    label = { Text("One-Time Authorization Code") },
+                                    placeholder = { Text("Paste code (4/0A...) from Google") },
+                                    singleLine = true,
+                                    modifier = Modifier.fillMaxWidth(),
+                                    shape = RoundedCornerShape(10.dp)
+                                )
+
+                                if (state.ottError != null) {
+                                    Text(
+                                        text = state.ottError!!,
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.error
+                                    )
+                                }
+
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    OutlinedButton(
+                                        onClick = { viewModel.dismissOttDialog() },
+                                        modifier = Modifier.weight(1f),
+                                        shape = RoundedCornerShape(10.dp)
+                                    ) {
+                                        Text("Cancel")
+                                    }
+
+                                    Button(
+                                        onClick = { viewModel.submitAgyOAuthCode(state.ottInput) },
+                                        enabled = state.ottInput.isNotBlank() && !state.ottLoading,
+                                        modifier = Modifier.weight(1f),
+                                        shape = RoundedCornerShape(10.dp)
+                                    ) {
+                                        if (state.ottLoading) {
+                                            CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
+                                        } else {
+                                            Text("Complete Sign-In", fontWeight = FontWeight.Bold)
+                                        }
+                                    }
+                                }
+                            }
+                        } else {
+                            // SIGNED_OUT or ERROR
+                            Column(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                if (auth.status == AntigravityAuthStatus.ERROR && auth.message != null) {
+                                    Text(
+                                        text = auth.message!!,
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.error
+                                    )
+                                }
+
                                 Button(
-                                    onClick = { viewModel.showOttDialog() },
+                                    onClick = { viewModel.startAgyOAuthFlow() },
                                     modifier = Modifier.fillMaxWidth(),
                                     shape = RoundedCornerShape(12.dp),
                                     colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
                                 ) {
-                                    Icon(imageVector = Icons.Rounded.Terminal, contentDescription = null)
+                                    Icon(imageVector = Icons.Rounded.AccountCircle, contentDescription = null)
                                     Spacer(modifier = Modifier.width(8.dp))
-                                    Text("Log In to Antigravity CLI (agy auth login)", fontWeight = FontWeight.Bold)
+                                    Text(
+                                        if (auth.status == AntigravityAuthStatus.ERROR) "Retry Google Sign-In (Official agy)"
+                                        else "Sign in with Google (Official Antigravity CLI)",
+                                        fontWeight = FontWeight.Bold
+                                    )
                                 }
 
                                 OutlinedButton(
-                                    onClick = { launchGoogleSignIn() },
+                                    onClick = { viewModel.showOttDialog() },
                                     modifier = Modifier.fillMaxWidth(),
                                     shape = RoundedCornerShape(12.dp)
                                 ) {
-                                    Icon(imageVector = Icons.Rounded.AccountCircle, contentDescription = null)
+                                    Icon(imageVector = Icons.Rounded.Key, contentDescription = null)
                                     Spacer(modifier = Modifier.width(8.dp))
-                                    Text("1-Tap Google Account Login", style = MaterialTheme.typography.labelMedium)
+                                    Text("Link Google Gemini API Key (AI Studio)")
                                 }
                             }
                         }
@@ -602,19 +704,18 @@ fun SettingsScreen(
                             modifier = Modifier.size(24.dp)
                         )
                         Spacer(modifier = Modifier.width(8.dp))
-                        Text("Antigravity CLI Login")
+                        Text("Google Gemini API Key")
                     }
                 },
                 text = {
                     Column {
                         Text(
-                            text = "Authenticate your local Antigravity CLI session (agy auth login) or link a Google Gemini API Key for autonomous agent execution.",
+                            text = "Link your Google Gemini API Key from Google AI Studio to enable direct autonomous execution without browser sign-in.",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                         Spacer(modifier = Modifier.height(14.dp))
 
-                        // Fast option 1: Open Google AI Studio in Browser (Direct free API Key generation)
                         Button(
                             onClick = {
                                 try {
@@ -633,47 +734,10 @@ fun SettingsScreen(
                             Text("Get Free Gemini Key (Google AI Studio)")
                         }
 
-                        Spacer(modifier = Modifier.height(8.dp))
+                        Spacer(modifier = Modifier.height(14.dp))
 
-                        // Fast option 2: Open Google Account Sign-In in Browser
-                        OutlinedButton(
-                            onClick = {
-                                try {
-                                    val browserIntent = Intent(
-                                        Intent.ACTION_VIEW,
-                                        Uri.parse("https://accounts.google.com/signin")
-                                    )
-                                    context.startActivity(browserIntent)
-                                } catch (ignored: Exception) {}
-                            },
-                            modifier = Modifier.fillMaxWidth(),
-                            shape = RoundedCornerShape(10.dp)
-                        ) {
-                            Icon(Icons.Rounded.OpenInNew, contentDescription = null, modifier = Modifier.size(16.dp))
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Text("Open Google Account Sign-In")
-                        }
-
-                        Spacer(modifier = Modifier.height(8.dp))
-
-                        // Fast option 3: 1-Tap Device Account Login
-                        OutlinedButton(
-                            onClick = {
-                                launchGoogleSignIn()
-                            },
-                            modifier = Modifier.fillMaxWidth(),
-                            shape = RoundedCornerShape(10.dp)
-                        ) {
-                            Icon(Icons.Rounded.AccountCircle, contentDescription = null, modifier = Modifier.size(16.dp))
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Text("1-Tap Device Account Login")
-                        }
-
-                        Spacer(modifier = Modifier.height(12.dp))
-
-                        // Option 4: Manual API Key / Token / One-Time Code Entry
                         Text(
-                            text = "Or paste Gemini API Key / Antigravity Token:",
+                            text = "Paste Gemini API Key:",
                             style = MaterialTheme.typography.labelSmall,
                             fontWeight = FontWeight.Bold,
                             color = MaterialTheme.colorScheme.onSurface
@@ -682,10 +746,11 @@ fun SettingsScreen(
                         OutlinedTextField(
                             value = state.ottInput,
                             onValueChange = { viewModel.onOttInputChanged(it) },
-                            label = { Text("Gemini API Key or Antigravity Token") },
-                            placeholder = { Text("AIzaSy... or agy_auth_... or email") },
+                            label = { Text("Gemini API Key") },
+                            placeholder = { Text("AIzaSy...") },
                             singleLine = true,
-                            modifier = Modifier.fillMaxWidth()
+                            modifier = Modifier.fillMaxWidth(),
+                            shape = RoundedCornerShape(10.dp)
                         )
                         if (state.ottError != null) {
                             Spacer(modifier = Modifier.height(4.dp))
@@ -702,12 +767,13 @@ fun SettingsScreen(
                         onClick = {
                             viewModel.submitOttSignIn()
                         },
-                        enabled = !state.ottLoading && state.ottInput.isNotBlank()
+                        enabled = !state.ottLoading && state.ottInput.isNotBlank(),
+                        shape = RoundedCornerShape(10.dp)
                     ) {
                         if (state.ottLoading) {
                             CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
                         } else {
-                            Text("Log In to CLI")
+                            Text("Save Key")
                         }
                     }
                 },
