@@ -181,7 +181,17 @@ class AgentOrchestrator(
         }
 
         // 2. Try CLI auth token if available and non-blank
-        val cliToken = settings.cliAuthToken?.trim()
+        var cliToken = settings.cliAuthToken?.trim()
+        if (cliToken.isNullOrBlank() || cliToken == "agy_official_oauth") {
+            val tokenFile = File(context.filesDir, ".gemini/antigravity-cli/antigravity-oauth-token")
+            if (tokenFile.exists()) {
+                cliToken = runCatching {
+                    val json = JSONObject(tokenFile.readText())
+                    json.optJSONObject("token")?.optString("access_token")
+                        ?: json.optString("token").takeIf { it.isNotBlank() }
+                }.getOrNull()
+            }
+        }
         if (!cliToken.isNullOrBlank()) {
             try {
                 onStatusUpdate?.invoke("Querying Antigravity session with $selectedModel...")
@@ -220,7 +230,12 @@ class AgentOrchestrator(
                 else -> model.trim().replace(" ", "-").lowercase()
             }
 
-            val targetUrl = "https://generativelanguage.googleapis.com/v1beta/models/$resolvedModelSlug:generateContent?key=$apiKey"
+            val isBearer = apiKey.startsWith("ya29.") || !apiKey.startsWith("AIza")
+            val targetUrl = if (isBearer) {
+                "https://generativelanguage.googleapis.com/v1beta/models/$resolvedModelSlug:generateContent"
+            } else {
+                "https://generativelanguage.googleapis.com/v1beta/models/$resolvedModelSlug:generateContent?key=$apiKey"
+            }
 
             val payload = JSONObject().apply {
                 put("contents", JSONArray().apply {
@@ -233,10 +248,15 @@ class AgentOrchestrator(
                 })
             }
 
-            val request = Request.Builder()
+            val reqBuilder = Request.Builder()
                 .url(targetUrl)
                 .post(payload.toString().toRequestBody("application/json".toMediaType()))
-                .build()
+
+            if (isBearer) {
+                reqBuilder.addHeader("Authorization", "Bearer $apiKey")
+            }
+
+            val request = reqBuilder.build()
 
             httpClient.newCall(request).execute().use { response ->
                 if (!response.isSuccessful) {

@@ -39,8 +39,8 @@ class AntigravityCliWrapper(
         context = context,
         initiallySignedIn = settingsRepository.settings.value.isCliAuthenticated,
         initialAccountEmail = settingsRepository.settings.value.googleUserEmail,
-        onSignedInChanged = { signedIn, email ->
-            settingsRepository.setCliAuth(signedIn, email, if (signedIn) "agy_official_oauth" else null)
+        onSignedInChanged = { signedIn, email, token ->
+            settingsRepository.setCliAuth(signedIn, email, token ?: if (signedIn) "agy_official_oauth" else null)
             if (signedIn) {
                 scope.launch {
                     try {

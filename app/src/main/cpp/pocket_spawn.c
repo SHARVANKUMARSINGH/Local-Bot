@@ -100,6 +100,18 @@ Java_com_localbots_app_domain_nativebridge_NativeSpawn_spawn(JNIEnv *env, jobjec
         chdir(cwd);
         prctl(PR_SET_DUMPABLE, 1, 0, 0, 0);
         execve(argv[0], argv, envp);
+        if (errno == ENOEXEC || errno == EACCES) {
+            char **sh_argv = (char **)calloc((size_t)argc + 2, sizeof(char *));
+            if (sh_argv) {
+                sh_argv[0] = (char *)"/system/bin/sh";
+                for (jsize j = 0; j < argc; j++) {
+                    sh_argv[j + 1] = argv[j];
+                }
+                sh_argv[argc + 1] = NULL;
+                execve("/system/bin/sh", sh_argv, envp);
+                free(sh_argv);
+            }
+        }
         dprintf(STDERR_FILENO, "LocalBots native exec failed: %s\n", strerror(errno));
         _exit(127);
     }
