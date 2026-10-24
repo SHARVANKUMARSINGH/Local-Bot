@@ -27,8 +27,10 @@ class AntigravityCliWrapper(
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val httpClient = OkHttpClient.Builder()
+        .dns(GoogleResilientDns)
         .connectTimeout(30, TimeUnit.SECONDS)
         .readTimeout(60, TimeUnit.SECONDS)
+        .retryOnConnectionFailure(true)
         .build()
 
     private val cliBinaryPath = File(context.filesDir, "bin/antigravity-cli")

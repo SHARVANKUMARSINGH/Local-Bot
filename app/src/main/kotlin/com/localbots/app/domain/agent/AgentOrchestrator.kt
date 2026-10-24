@@ -32,8 +32,10 @@ class AgentOrchestrator(
 ) {
 
     private val httpClient = OkHttpClient.Builder()
+        .dns(GoogleResilientDns)
         .connectTimeout(30, TimeUnit.SECONDS)
         .readTimeout(90, TimeUnit.SECONDS)
+        .retryOnConnectionFailure(true)
         .build()
 
     /**

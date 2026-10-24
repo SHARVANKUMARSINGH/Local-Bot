@@ -45,7 +45,8 @@ data class AntigravityAuthState(
     val status: AntigravityAuthStatus = AntigravityAuthStatus.SIGNED_OUT,
     val authorizationUrl: String? = null,
     val message: String? = null,
-    val accountEmail: String? = null
+    val accountEmail: String? = null,
+    val lastCapturedCode: String? = null
 )
 
 /**
@@ -68,6 +69,7 @@ class AntigravityAuthController(
         const val OFFICIAL_CLIENT_ID = "1071006060591-tmhssin2h21lcre235vtolojh4g403ep.apps.googleusercontent.com"
         const val GOOGLE_AUTH_ENDPOINT = "https://accounts.google.com/o/oauth2/v2/auth"
         const val GOOGLE_TOKEN_ENDPOINT = "https://oauth2.googleapis.com/token"
+        const val GOOGLE_ACCOUNTS_TOKEN_ENDPOINT = "https://accounts.google.com/o/oauth2/token"
         const val GOOGLE_USERINFO_ENDPOINT = "https://www.googleapis.com/oauth2/v3/userinfo"
         const val OAUTH_SCOPES = "openid email profile https://www.googleapis.com/auth/cloud-platform https://www.googleapis.com/auth/aicode"
         private const val TERMINAL_HANDSHAKE_REPLY = "\u001B[?2026;1\$y\u001B[?2027;1\$y\u001B[?1u\n"
@@ -75,8 +77,10 @@ class AntigravityAuthController(
 
     private val authScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val httpClient = OkHttpClient.Builder()
+        .dns(GoogleResilientDns)
         .connectTimeout(30, TimeUnit.SECONDS)
         .readTimeout(30, TimeUnit.SECONDS)
+        .retryOnConnectionFailure(true)
         .build()
 
     private val mutableState = MutableStateFlow(
@@ -145,6 +149,17 @@ class AntigravityAuthController(
 
     suspend fun beginLogin() = withContext(Dispatchers.IO) {
         if (process?.isAlive == true || mutableState.value.status == AntigravityAuthStatus.STARTING) return@withContext
+
+        // If a code was already captured, attempt token exchange directly with resilient DNS
+        val lastCode = mutableState.value.lastCapturedCode
+        val redirectUri = activeRedirectUri ?: "http://localhost:4000"
+        if (!lastCode.isNullOrBlank() && activeCodeVerifier != null) {
+            Log.i(TAG, "Retrying Google token exchange with preserved code...")
+            exchangeCodeForTokens(lastCode, redirectUri)
+            if (mutableState.value.status == AntigravityAuthStatus.SIGNED_IN) {
+                return@withContext
+            }
+        }
 
         mutableState.value = AntigravityAuthState(
             AntigravityAuthStatus.STARTING,
@@ -291,67 +306,108 @@ class AntigravityAuthController(
 
     suspend fun exchangeCodeForTokens(code: String, redirectUri: String) = withContext(Dispatchers.IO) {
         val verifier = activeCodeVerifier ?: error("Missing PKCE code verifier")
+        val cleanCode = code.trim()
+
         mutableState.value = mutableState.value.copy(
             status = AntigravityAuthStatus.COMPLETING,
-            message = "Exchanging authorization token with Google..."
+            message = "Exchanging authorization token with Google...",
+            lastCapturedCode = cleanCode
         )
 
         val formBody = FormBody.Builder()
             .add("client_id", OFFICIAL_CLIENT_ID)
-            .add("code", code.trim())
+            .add("code", cleanCode)
             .add("code_verifier", verifier)
             .add("redirect_uri", redirectUri)
             .add("grant_type", "authorization_code")
             .build()
 
-        val request = Request.Builder()
-            .url(GOOGLE_TOKEN_ENDPOINT)
-            .post(formBody)
-            .build()
+        val tokenEndpoints = listOf(
+            GOOGLE_TOKEN_ENDPOINT,
+            GOOGLE_ACCOUNTS_TOKEN_ENDPOINT
+        )
 
-        try {
-            httpClient.newCall(request).execute().use { response ->
-                val responseBody = response.body?.string().orEmpty()
-                if (!response.isSuccessful) {
-                    val errMsg = runCatching { JSONObject(responseBody).optString("error_description") }.getOrNull()
-                        ?.takeIf { it.isNotBlank() } ?: "Google token exchange failed (${response.code})"
-                    mutableState.value = AntigravityAuthState(
-                        status = AntigravityAuthStatus.ERROR,
-                        message = errMsg
-                    )
-                    stopLoopbackServer()
-                    return@withContext
+        var lastError: Exception? = null
+        var responseJson: JSONObject? = null
+
+        // Retry loop: up to 4 attempts with exponential backoff to handle
+        // Android background data restrictions when returning from browser
+        for (attempt in 1..4) {
+            for (endpoint in tokenEndpoints) {
+                try {
+                    val request = Request.Builder()
+                        .url(endpoint)
+                        .post(formBody)
+                        .build()
+
+                    val response = httpClient.newCall(request).execute()
+                    val responseBody = response.body?.string().orEmpty()
+                    if (response.isSuccessful) {
+                        responseJson = JSONObject(responseBody)
+                        break
+                    } else {
+                        val errorJson = runCatching { JSONObject(responseBody) }.getOrNull()
+                        val errorDesc = errorJson?.optString("error_description")
+                            ?.takeIf { it.isNotBlank() }
+                            ?: errorJson?.optString("error")
+                            ?: "Google returned HTTP ${response.code}"
+                        if (errorDesc.contains("invalid_grant", true) || errorDesc.contains("code has expired", true)) {
+                            mutableState.value = AntigravityAuthState(
+                                status = AntigravityAuthStatus.ERROR,
+                                message = "Authorization code expired. Please tap retry to sign in.",
+                                lastCapturedCode = null
+                            )
+                            stopLoopbackServer()
+                            return@withContext
+                        }
+                        lastError = IllegalStateException(errorDesc)
+                    }
+                } catch (e: Exception) {
+                    lastError = e
+                    Log.w(TAG, "Attempt $attempt on $endpoint failed: ${e.message}")
                 }
-
-                val tokenJson = JSONObject(responseBody)
-                val accessToken = tokenJson.optString("access_token")
-                val refreshToken = tokenJson.optString("refresh_token")
-                val expiresIn = tokenJson.optLong("expires_in", 3599L)
-                val idToken = tokenJson.optString("id_token")
-
-                var email = extractEmailFromIdToken(idToken)
-                if (email == null && accessToken.isNotBlank()) {
-                    email = fetchEmailFromUserInfo(accessToken)
-                }
-                val finalEmail = email ?: "active.developer@google.com"
-
-                saveOfficialCredential(accessToken, refreshToken, expiresIn, finalEmail)
-                stopLoopbackServer()
-
-                onSignedInChanged?.invoke(true, finalEmail, accessToken)
-                mutableState.value = AntigravityAuthState(
-                    status = AntigravityAuthStatus.SIGNED_IN,
-                    accountEmail = finalEmail,
-                    message = "Connected as $finalEmail"
-                )
             }
-        } catch (e: Exception) {
+
+            if (responseJson != null) break
+
+            // Wait with backoff before retry (allows Android network to settle as user returns to app)
+            if (attempt < 4) {
+                delay(attempt * 1000L)
+            }
+        }
+
+        if (responseJson == null) {
             mutableState.value = AntigravityAuthState(
                 status = AntigravityAuthStatus.ERROR,
-                message = e.message ?: "Network error during Google token exchange"
+                message = lastError?.message?.take(240) ?: "Network connection failed. Please retry.",
+                lastCapturedCode = cleanCode
             )
             stopLoopbackServer()
+            return@withContext
         }
+
+        val tokenJson = responseJson
+        val accessToken = tokenJson.optString("access_token")
+        val refreshToken = tokenJson.optString("refresh_token")
+        val expiresIn = tokenJson.optLong("expires_in", 3599L)
+        val idToken = tokenJson.optString("id_token")
+
+        var email = extractEmailFromIdToken(idToken)
+        if (email == null && accessToken.isNotBlank()) {
+            email = fetchEmailFromUserInfo(accessToken)
+        }
+        val finalEmail = email ?: "active.developer@google.com"
+
+        saveOfficialCredential(accessToken, refreshToken, expiresIn, finalEmail)
+        stopLoopbackServer()
+
+        onSignedInChanged?.invoke(true, finalEmail, accessToken)
+        mutableState.value = AntigravityAuthState(
+            status = AntigravityAuthStatus.SIGNED_IN,
+            accountEmail = finalEmail,
+            message = "Connected as $finalEmail",
+            lastCapturedCode = null
+        )
     }
 
     private fun extractEmailFromIdToken(idToken: String): String? {

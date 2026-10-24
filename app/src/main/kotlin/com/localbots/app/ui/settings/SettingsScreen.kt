@@ -102,6 +102,13 @@ fun SettingsScreen(
         }
     }
 
+    // Auto-populate captured code if available
+    LaunchedEffect(auth.lastCapturedCode) {
+        if (!auth.lastCapturedCode.isNullOrBlank() && state.ottInput.isBlank()) {
+            viewModel.onOttInputChanged(auth.lastCapturedCode!!)
+        }
+    }
+
     Scaffold(
         modifier = modifier.fillMaxSize(),
         topBar = {
